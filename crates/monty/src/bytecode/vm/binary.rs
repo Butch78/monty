@@ -6,8 +6,11 @@ use crate::{
     exception_private::{ExcType, RunError},
     heap::HeapGuard,
     resource::ResourceTracker,
-    types::PyTrait,
-    value::BitwiseOp,
+    types::{
+        PyTrait,
+        set::{SetBinaryOp, binary_set_op},
+    },
+    value::{BitwiseOp, Value},
 };
 
 impl<T: ResourceTracker> VM<'_, '_, T> {
@@ -39,7 +42,10 @@ impl<T: ResourceTracker> VM<'_, '_, T> {
 
     /// Binary subtraction with proper refcount handling.
     ///
-    /// Uses lazy type capture: only calls `py_type()` in error paths.
+    /// Handles both numeric subtraction and set difference (`-` operator).
+    /// For sets/frozensets, delegates to [`binary_set_op`] which needs `interns`
+    /// for element hashing and equality. Uses lazy type capture: only calls
+    /// `py_type()` in error paths.
     pub(super) fn binary_sub(&mut self) -> Result<(), RunError> {
         let this = self;
 
@@ -47,6 +53,16 @@ impl<T: ResourceTracker> VM<'_, '_, T> {
         defer_drop!(rhs, this);
         let lhs = this.pop();
         defer_drop!(lhs, this);
+
+        // Set/frozenset difference: handled here because `py_sub` doesn't
+        // have access to `interns`, which set operations need for hashing.
+        if let (Value::Ref(lhs_id), Value::Ref(rhs_id)) = (lhs, rhs) {
+            let interns = this.interns;
+            if let Some(result) = binary_set_op(SetBinaryOp::Difference, *lhs_id, *rhs_id, this.heap, interns)? {
+                this.push(result);
+                return Ok(());
+            }
+        }
 
         match lhs.py_sub(rhs, this.heap) {
             Ok(Some(v)) => {
@@ -188,9 +204,12 @@ impl<T: ResourceTracker> VM<'_, '_, T> {
         }
     }
 
-    /// Binary bitwise operation on integers.
+    /// Binary bitwise operation on integers and sets.
     ///
-    /// Pops two values, performs the bitwise operation, and pushes the result.
+    /// For integers, performs standard bitwise operations (AND, OR, XOR, shifts).
+    /// For sets/frozensets, `|` maps to union, `&` to intersection, and `^` to
+    /// symmetric difference. Set operations are handled here because `py_bitwise`
+    /// doesn't have access to `interns`, which set operations need for hashing.
     pub(super) fn binary_bitwise(&mut self, op: BitwiseOp) -> Result<(), RunError> {
         let this = self;
 
@@ -198,6 +217,24 @@ impl<T: ResourceTracker> VM<'_, '_, T> {
         defer_drop!(rhs, this);
         let lhs = this.pop();
         defer_drop!(lhs, this);
+
+        // Set/frozenset operations: |, &, ^ map to union, intersection,
+        // symmetric_difference. Shifts don't apply to sets.
+        if let (Value::Ref(lhs_id), Value::Ref(rhs_id)) = (lhs, rhs) {
+            let set_op = match op {
+                BitwiseOp::Or => Some(SetBinaryOp::Union),
+                BitwiseOp::And => Some(SetBinaryOp::Intersection),
+                BitwiseOp::Xor => Some(SetBinaryOp::SymmetricDifference),
+                BitwiseOp::LShift | BitwiseOp::RShift => None,
+            };
+            if let Some(set_op) = set_op {
+                let interns = this.interns;
+                if let Some(result) = binary_set_op(set_op, *lhs_id, *rhs_id, this.heap, interns)? {
+                    this.push(result);
+                    return Ok(());
+                }
+            }
+        }
 
         let result = lhs.py_bitwise(rhs, op, this.heap)?;
         this.push(result);
