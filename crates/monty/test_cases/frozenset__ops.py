@@ -129,6 +129,25 @@ assert fs.issuperset([1, 2]), 'issuperset with list'
 assert fs.isdisjoint([4, 5, 6]), 'isdisjoint with list'
 assert not fs.isdisjoint([3, 4]), 'not isdisjoint with list'
 
+# === issubset/issuperset/isdisjoint with frozenset args ===
+fs1 = frozenset({1, 2})
+fs2 = frozenset({1, 2, 3})
+assert fs1.issubset(fs2), 'issubset with frozenset true'
+assert not fs2.issubset(fs1), 'issubset with frozenset false'
+assert fs2.issuperset(fs1), 'issuperset with frozenset true'
+assert not fs1.issuperset(fs2), 'issuperset with frozenset false'
+assert frozenset({1, 2}).isdisjoint(frozenset({3, 4})), 'isdisjoint with frozenset true'
+assert not frozenset({1, 2}).isdisjoint(frozenset({2, 3})), 'isdisjoint with frozenset false'
+
+# === issubset/issuperset/isdisjoint with set args ===
+fs = frozenset({1, 2})
+assert fs.issubset({1, 2, 3}), 'issubset with set true'
+assert not fs.issubset({1}), 'issubset with set false'
+assert fs.issuperset({1}), 'issuperset with set true'
+assert not fs.issuperset({1, 2, 3}), 'issuperset with set false'
+assert fs.isdisjoint({3, 4}), 'isdisjoint with set true'
+assert not fs.isdisjoint({2, 3}), 'isdisjoint with set false'
+
 # === Different hashes for different frozensets ===
 fs1 = frozenset({1, 2})
 fs2 = frozenset({3, 4})

@@ -411,6 +411,19 @@ assert frozenset({1, 2, 3}).intersection([2, 3]) == frozenset({2, 3}), 'frozense
 assert frozenset({1, 2, 3}).difference([2]) == frozenset({1, 3}), 'frozenset difference with list'
 assert frozenset({1, 2}).symmetric_difference([2, 3]) == frozenset({1, 3}), 'frozenset symmetric_difference with list'
 
+# === Shift operators on sets (TypeError) ===
+try:
+    {1, 2} << 1
+    assert False, 'set << int should raise TypeError'
+except TypeError as e:
+    assert str(e) == "unsupported operand type(s) for <<: 'set' and 'int'"
+
+try:
+    {1, 2} >> 1
+    assert False, 'set >> int should raise TypeError'
+except TypeError as e:
+    assert str(e) == "unsupported operand type(s) for >>: 'set' and 'int'"
+
 # === Nested frozensets as set elements ===
 s = {frozenset({1}), frozenset({2})}
 assert frozenset({1}) in s, 'frozenset in set positive'
