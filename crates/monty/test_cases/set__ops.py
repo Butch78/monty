@@ -188,6 +188,85 @@ assert type(result).__name__ == 'set', 'set | frozenset returns set'
 result = frozenset({1, 2}) | {3}
 assert type(result).__name__ == 'frozenset', 'frozenset | set returns frozenset'
 
+# === String elements ===
+assert {'a', 'b'} | {'b', 'c'} == {'a', 'b', 'c'}, 'string union'
+assert {'a', 'b'} & {'b', 'c'} == {'b'}, 'string intersection'
+assert {'a', 'b'} - {'b', 'c'} == {'a'}, 'string difference'
+assert {'a', 'b'} ^ {'b', 'c'} == {'a', 'c'}, 'string symmetric difference'
+
+# === None elements ===
+assert {None, 1} | {None, 2} == {None, 1, 2}, 'none element union'
+assert {None, 1} & {None, 2} == {None}, 'none element intersection'
+
+# === Tuple elements ===
+assert {(1, 2), (3, 4)} | {(1, 2), (5, 6)} == {(1, 2), (3, 4), (5, 6)}, 'tuple element union'
+
+# === Self-operations (same set on both sides) ===
+s = {1, 2, 3}
+assert s | s == {1, 2, 3}, 'self union is identity'
+assert s & s == {1, 2, 3}, 'self intersection is identity'
+assert s - s == set(), 'self difference is empty'
+assert s ^ s == set(), 'self symmetric difference is empty'
+
+# === Operators do not modify originals ===
+s1 = {1, 2, 3}
+s2 = {2, 3, 4}
+r = s1 | s2
+assert s1 == {1, 2, 3}, 'union does not modify lhs'
+assert s2 == {2, 3, 4}, 'union does not modify rhs'
+r = s1 - s2
+assert s1 == {1, 2, 3}, 'difference does not modify lhs'
+assert s2 == {2, 3, 4}, 'difference does not modify rhs'
+
+# === Chained operators ===
+assert {1, 2} | {3, 4} | {5, 6} == {1, 2, 3, 4, 5, 6}, 'chained union'
+assert {1, 2, 3} & {2, 3, 4} & {3, 4, 5} == {3}, 'chained intersection'
+
+# === Single element sets ===
+assert {1} | {2} == {1, 2}, 'single element union'
+assert {1} & {1} == {1}, 'single element intersection same'
+assert {1} & {2} == set(), 'single element intersection different'
+assert {1} - {1} == set(), 'single element difference same'
+assert {1} - {2} == {1}, 'single element difference different'
+assert {1} ^ {1} == set(), 'single element xor same'
+assert {1} ^ {2} == {1, 2}, 'single element xor different'
+
+# === Larger sets ===
+big1 = set(range(50))
+big2 = set(range(25, 75))
+assert len(big1 | big2) == 75, 'large set union len'
+assert len(big1 & big2) == 25, 'large set intersection len'
+assert len(big1 - big2) == 25, 'large set difference len'
+assert len(big1 ^ big2) == 50, 'large set symmetric difference len'
+
+# === Mixed set/frozenset — all operators ===
+s = {1, 2, 3}
+fs = frozenset({2, 3, 4})
+assert s | fs == {1, 2, 3, 4}, 'set | frozenset value'
+assert s & fs == {2, 3}, 'set & frozenset value'
+assert s - fs == {1}, 'set - frozenset value'
+assert s ^ fs == {1, 4}, 'set ^ frozenset value'
+assert fs | s == frozenset({1, 2, 3, 4}), 'frozenset | set value'
+assert fs & s == frozenset({2, 3}), 'frozenset & set value'
+assert fs - s == frozenset({4}), 'frozenset - set value'
+assert fs ^ s == frozenset({1, 4}), 'frozenset ^ set value'
+
+# === Return type for all mixed operators ===
+assert type(s | fs).__name__ == 'set', 'set | frozenset returns set'
+assert type(s & fs).__name__ == 'set', 'set & frozenset returns set'
+assert type(s - fs).__name__ == 'set', 'set - frozenset returns set'
+assert type(s ^ fs).__name__ == 'set', 'set ^ frozenset returns set'
+assert type(fs | s).__name__ == 'frozenset', 'frozenset | set returns frozenset'
+assert type(fs & s).__name__ == 'frozenset', 'frozenset & set returns frozenset'
+assert type(fs - s).__name__ == 'frozenset', 'frozenset - set returns frozenset'
+assert type(fs ^ s).__name__ == 'frozenset', 'frozenset ^ set returns frozenset'
+
+# === Augmented assignment with frozenset rhs ===
+s = {1, 2}
+s |= frozenset({3, 4})
+assert s == {1, 2, 3, 4}, 'augmented union with frozenset rhs'
+assert type(s).__name__ == 'set', 'augmented union preserves set type'
+
 # === Type errors for invalid operands ===
 try:
     {1, 2} | [3, 4]
@@ -216,3 +295,31 @@ try:
 except TypeError as e:
     msg = str(e)
     assert 'set' in msg and 'int' in msg, f'error should mention types, got: {e}'
+
+try:
+    {1, 2} | 42
+    assert False, 'set | int should raise TypeError'
+except TypeError as e:
+    msg = str(e)
+    assert 'set' in msg and 'int' in msg, f'error should mention types, got: {e}'
+
+try:
+    {1, 2} & [1]
+    assert False, 'set & list should raise TypeError'
+except TypeError as e:
+    msg = str(e)
+    assert 'set' in msg and 'list' in msg, f'error should mention types, got: {e}'
+
+try:
+    {1, 2} - 'x'
+    assert False, 'set - str should raise TypeError'
+except TypeError as e:
+    msg = str(e)
+    assert 'set' in msg and 'str' in msg, f'error should mention types, got: {e}'
+
+try:
+    {1, 2} ^ (1, 2)
+    assert False, 'set ^ tuple should raise TypeError'
+except TypeError as e:
+    msg = str(e)
+    assert 'set' in msg and 'tuple' in msg, f'error should mention types, got: {e}'
