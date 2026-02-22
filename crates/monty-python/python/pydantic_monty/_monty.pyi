@@ -41,6 +41,7 @@ class Monty:
         type_check: bool = False,
         type_check_stubs: str | None = None,
         dataclass_registry: list[type] | None = None,
+        python_version: Literal['3.10', '3.11', '3.12', '3.13', '3.14'] | None = None,
     ) -> Self:
         """
         Create a new Monty interpreter by parsing the given code.
@@ -55,10 +56,14 @@ class Monty:
                 e.g. with input variable declarations or external function signatures
             dataclass_registry: Optional list of dataclass types to register for proper
                 isinstance() support on output, see `register_dataclass()` above.
+            python_version: Target Python version as 'major.minor' (e.g. '3.12').
+                Defaults to '3.14'. Affects sys.version_info and type checking target.
+                Supported: '3.10', '3.11', '3.12', '3.13', '3.14'.
 
         Raises:
             MontySyntaxError: If the code cannot be parsed
             MontyTypingError: If type_check is True and type errors are found
+            ValueError: If python_version is not a supported version string
         """
 
     def type_check(self, prefix_code: str | None = None) -> None:

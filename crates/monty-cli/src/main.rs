@@ -6,7 +6,7 @@ use std::{
 
 use clap::Parser;
 use monty::{
-    MontyObject, MontyRepl, MontyRun, NoLimitTracker, PrintWriter, ReplContinuationMode, RunProgress,
+    MontyObject, MontyRepl, MontyRun, NoLimitTracker, PrintWriter, PythonVersion, ReplContinuationMode, RunProgress,
     detect_repl_continuation_mode,
 };
 use rustyline::{DefaultEditor, error::ReadlineError};
@@ -102,7 +102,13 @@ fn main() -> ExitCode {
 fn run_script(file_path: &str, code: String, type_check_enabled: bool) -> ExitCode {
     if type_check_enabled {
         let start = Instant::now();
-        if let Some(failure) = type_check(&SourceFile::new(&code, file_path), None).unwrap() {
+        if let Some(failure) = type_check(
+            &SourceFile::new(&code, file_path),
+            None,
+            PythonVersion::default().to_ruff(),
+        )
+        .unwrap()
+        {
             let elapsed = start.elapsed();
             eprintln!(
                 "{DIM}{}{RESET} {BOLD_CYAN}{ARROW}{RESET} {BOLD_RED}type check failed{RESET}:\n{failure}",

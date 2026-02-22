@@ -12,6 +12,7 @@ use ruff_db::{
     files::{File, FileRootKind, system_path_to_file},
     system::{DbWithWritableSystem as _, SystemPathBuf},
 };
+use ruff_python_ast::PythonVersion;
 use ruff_text_size::{TextRange, TextSize};
 use ty_module_resolver::SearchPathSettings;
 use ty_python_semantic::{
@@ -41,6 +42,7 @@ impl<'a> SourceFile<'a> {
 /// # Arguments
 /// * `python_source` - The python source code to type check.
 /// * `stubs_file` - Optional stubs file to use for type checking.
+/// * `python_version` - The Python version to target for type checking.
 ///
 /// # Returns
 /// * `Ok(Some(TypeCheckingFailure))` - If there are typing errors.
@@ -49,8 +51,9 @@ impl<'a> SourceFile<'a> {
 pub fn type_check(
     python_source: &SourceFile<'_>,
     stubs_file: Option<&SourceFile<'_>>,
+    python_version: PythonVersion,
 ) -> Result<Option<TypeCheckingDiagnostics>, String> {
-    let mut db = MemoryDb::new();
+    let mut db = MemoryDb::with_python_version(python_version);
 
     // Files must be written under a directory that's registered as a search path for module
     // resolution to work. We use "/" as the root directory so paths appear without a prefix.

@@ -26,6 +26,8 @@ pub(crate) struct MemoryDb {
     vendored: VendoredFileSystem,
     rule_selection: Arc<RuleSelection>,
     analysis_settings: Arc<AnalysisSettings>,
+    /// The target Python version for type checking.
+    target_python_version: PythonVersion,
 }
 
 impl fmt::Debug for MemoryDb {
@@ -36,12 +38,14 @@ impl fmt::Debug for MemoryDb {
             .field("vendored", &self.vendored)
             .field("rule_selection", &self.rule_selection)
             .field("analysis_settings", &self.analysis_settings)
+            .field("target_python_version", &self.target_python_version)
             .finish_non_exhaustive()
     }
 }
 
 impl MemoryDb {
-    pub fn new() -> Self {
+    /// Creates a new `MemoryDb` targeting the specified Python version.
+    pub fn with_python_version(python_version: PythonVersion) -> Self {
         Self {
             storage: salsa::Storage::new(None),
             system: TestSystem::default(),
@@ -49,6 +53,7 @@ impl MemoryDb {
             files: Files::default(),
             rule_selection: Arc::new(RuleSelection::from_registry(default_lint_registry())),
             analysis_settings: AnalysisSettings::default().into(),
+            target_python_version: python_version,
         }
     }
 }
@@ -78,7 +83,7 @@ impl SourceDb for MemoryDb {
     }
 
     fn python_version(&self) -> PythonVersion {
-        PythonVersion::PY314
+        self.target_python_version
     }
 }
 

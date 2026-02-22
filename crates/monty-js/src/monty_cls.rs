@@ -47,7 +47,7 @@ use std::borrow::Cow;
 
 use monty::{
     ExcType, ExternalResult, LimitedTracker, MontyException, MontyObject, MontyRepl as CoreMontyRepl, MontyRun,
-    NoLimitTracker, PrintWriter, PrintWriterCallback, ResourceTracker, RunProgress, Snapshot,
+    NoLimitTracker, PrintWriter, PrintWriterCallback, PythonVersion, ResourceTracker, RunProgress, Snapshot,
 };
 use monty_type_checking::{type_check, SourceFile};
 use napi::bindgen_prelude::*;
@@ -94,6 +94,9 @@ pub struct MontyOptions {
     pub type_check: Option<bool>,
     /// Optional code to prepend before type checking.
     pub type_check_prefix_code: Option<String>,
+    /// Target Python version as "major.minor" (e.g. "3.12"). Default: "3.14".
+    /// Supported versions: "3.10", "3.11", "3.12", "3.13", "3.14".
+    pub python_version: Option<String>,
 }
 
 /// Options for running code.
@@ -143,17 +146,26 @@ impl Monty {
             external_function_names,
             do_type_check,
             type_check_prefix_code,
-        } = resolve_monty_options(options);
+            python_version,
+        } = resolve_monty_options(options)?;
 
         // Perform type checking if requested
         if do_type_check {
-            if let Some(error) = run_type_check_result(&code, &script_name, type_check_prefix_code.as_deref())? {
+            if let Some(error) =
+                run_type_check_result(&code, &script_name, type_check_prefix_code.as_deref(), python_version)?
+            {
                 return Ok(Either3::C(error));
             }
         }
 
         // Create the runner (parses the code)
-        let runner = match MontyRun::new(code, &script_name, input_names.clone(), external_function_names.clone()) {
+        let runner = match MontyRun::with_version(
+            code,
+            &script_name,
+            input_names.clone(),
+            external_function_names.clone(),
+            python_version,
+        ) {
             Ok(r) => r,
             Err(exc) => return Ok(Either3::B(JsMontyException::new(exc))),
         };
@@ -174,7 +186,12 @@ impl Monty {
     /// @returns null on success, or MontyTypingError on failure
     #[napi]
     pub fn type_check(&self, prefix_code: Option<String>) -> Result<Option<MontyTypingError>> {
-        run_type_check_result(self.runner.code(), &self.script_name, prefix_code.as_deref())
+        run_type_check_result(
+            self.runner.code(),
+            &self.script_name,
+            prefix_code.as_deref(),
+            self.runner.python_version(),
+        )
     }
 
     /// Executes the code and returns the result, or an exception object if execution fails.
@@ -427,7 +444,12 @@ impl Monty {
 /// Performs type checking on the code and returns the error object if there are type errors.
 ///
 /// Returns `None` if type checking passes, or `Some(MontyTypingError)` if there are errors.
-fn run_type_check_result(code: &str, script_name: &str, prefix_code: Option<&str>) -> Result<Option<MontyTypingError>> {
+fn run_type_check_result(
+    code: &str,
+    script_name: &str,
+    prefix_code: Option<&str>,
+    python_version: PythonVersion,
+) -> Result<Option<MontyTypingError>> {
     let source_code: Cow<str> = if let Some(prefix_code) = prefix_code {
         format!("{prefix_code}\n{code}").into()
     } else {
@@ -435,8 +457,8 @@ fn run_type_check_result(code: &str, script_name: &str, prefix_code: Option<&str
     };
 
     let source_file = SourceFile::new(&source_code, script_name);
-    let result =
-        type_check(&source_file, None).map_err(|e| Error::from_reason(format!("Type checking failed: {e}")))?;
+    let result = type_check(&source_file, None, python_version.to_ruff())
+        .map_err(|e| Error::from_reason(format!("Type checking failed: {e}")))?;
 
     Ok(result.map(MontyTypingError::from_failure))
 }
@@ -489,10 +511,13 @@ impl MontyRepl {
             external_function_names,
             do_type_check,
             type_check_prefix_code,
-        } = resolve_monty_options(options);
+            python_version,
+        } = resolve_monty_options(options)?;
 
         if do_type_check {
-            if let Some(error) = run_type_check_result(&code, &script_name, type_check_prefix_code.as_deref())? {
+            if let Some(error) =
+                run_type_check_result(&code, &script_name, type_check_prefix_code.as_deref(), python_version)?
+            {
                 return Ok(Either3::C(error));
             }
         }
@@ -611,25 +636,32 @@ struct ResolvedMontyOptions {
     external_function_names: Vec<String>,
     do_type_check: bool,
     type_check_prefix_code: Option<String>,
+    python_version: PythonVersion,
 }
 
 /// Normalizes optional JS-facing creation options into concrete defaults.
-fn resolve_monty_options(options: Option<MontyOptions>) -> ResolvedMontyOptions {
-    let options = options.unwrap_or(MontyOptions {
-        script_name: None,
-        inputs: None,
-        external_functions: None,
-        type_check: None,
-        type_check_prefix_code: None,
-    });
+///
+/// Returns `Err` if `python_version` is provided but not a supported version string.
+fn resolve_monty_options(options: Option<MontyOptions>) -> Result<ResolvedMontyOptions> {
+    let options = options.unwrap_or_default();
 
-    ResolvedMontyOptions {
+    let python_version = match options.python_version.as_deref() {
+        None => PythonVersion::default(),
+        Some(s) => PythonVersion::from_str_opt(s).ok_or_else(|| {
+            Error::from_reason(format!(
+                "unsupported pythonVersion '{s}', expected one of: '3.10', '3.11', '3.12', '3.13', '3.14'"
+            ))
+        })?,
+    };
+
+    Ok(ResolvedMontyOptions {
         script_name: options.script_name.unwrap_or_else(|| "main.py".to_string()),
         input_names: options.inputs.unwrap_or_default(),
         external_function_names: options.external_functions.unwrap_or_default(),
         do_type_check: options.type_check.unwrap_or(false),
         type_check_prefix_code: options.type_check_prefix_code,
-    }
+        python_version,
+    })
 }
 
 /// Extracts input values in declaration order from a JS object.

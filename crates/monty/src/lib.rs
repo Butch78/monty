@@ -19,6 +19,7 @@ mod object;
 mod os;
 mod parse;
 mod prepare;
+mod python_version;
 mod repl;
 mod resource;
 mod run;
@@ -35,6 +36,7 @@ pub use crate::{
     io::{PrintWriter, PrintWriterCallback},
     object::{DictPairs, InvalidInputError, MontyObject},
     os::{OsFunction, dir_stat, file_stat, stat_result, symlink_stat},
+    python_version::PythonVersion,
     repl::{
         MontyRepl, ReplContinuationMode, ReplFutureSnapshot, ReplProgress, ReplSnapshot, ReplStartError,
         detect_repl_continuation_mode,

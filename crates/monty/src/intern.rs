@@ -594,6 +594,7 @@ fn get_str(strings: &[String], id: StringId) -> &str {
 /// Read-only storage for interned strings, bytes, and long integers.
 ///
 /// This provides lookup by `StringId`, `BytesId`, `LongIntId` and `FunctionId` for interned literals and functions.
+/// Also carries the target [`PythonVersion`] so the VM can create version-aware modules.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Interns {
     strings: Vec<String>,
@@ -601,6 +602,8 @@ pub(crate) struct Interns {
     long_ints: Vec<BigInt>,
     functions: Vec<Function>,
     external_functions: Vec<String>,
+    /// The Python version this interpreter targets.
+    python_version: crate::python_version::PythonVersion,
 }
 
 impl Interns {
@@ -611,7 +614,18 @@ impl Interns {
             long_ints: interner.long_ints,
             functions,
             external_functions,
+            python_version: crate::python_version::PythonVersion::default(),
         }
+    }
+
+    /// Sets the target Python version.
+    pub fn set_python_version(&mut self, version: crate::python_version::PythonVersion) {
+        self.python_version = version;
+    }
+
+    /// Returns the target Python version.
+    pub fn python_version(&self) -> crate::python_version::PythonVersion {
+        self.python_version
     }
 
     /// Looks up a string by its `StringId`.

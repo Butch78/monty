@@ -3,7 +3,7 @@ use std::{borrow::Cow, fmt::Write};
 // Use `::monty` to refer to the external crate (not the pymodule)
 use ::monty::{
     ExternalResult, LimitedTracker, MontyException, MontyObject, MontyRepl as CoreMontyRepl, MontyRun, NoLimitTracker,
-    PrintWriter, PrintWriterCallback, ResourceTracker, RunProgress, Snapshot,
+    PrintWriter, PrintWriterCallback, PythonVersion, ResourceTracker, RunProgress, Snapshot,
 };
 use monty::{ExcType, FutureSnapshot, OsFunction};
 use monty_type_checking::{SourceFile, type_check};
@@ -53,13 +53,15 @@ impl PyMonty {
     ///
     /// # Arguments
     /// * `code` - Python code to execute
+    /// * `script_name` - Name used in tracebacks and error messages
     /// * `inputs` - List of input variable names available in the code
     /// * `external_functions` - List of external function names the code can call
     /// * `type_check` - Whether to perform type checking on the code
     /// * `type_check_stubs` - Prefix code to be executed before type checking
-    /// * `dataclass_registry` - Registry of dataclass types for reconstructing original types on output.
+    /// * `dataclass_registry` - Registry of dataclass types for reconstructing original types on output
+    /// * `python_version` - Target Python version as "major.minor" (e.g. "3.12"). Defaults to "3.14".
     #[new]
-    #[pyo3(signature = (code, *, script_name="main.py", inputs=None, external_functions=None, type_check=false, type_check_stubs=None, dataclass_registry=None))]
+    #[pyo3(signature = (code, *, script_name="main.py", inputs=None, external_functions=None, type_check=false, type_check_stubs=None, dataclass_registry=None, python_version=None))]
     #[expect(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
@@ -70,17 +72,25 @@ impl PyMonty {
         type_check: bool,
         type_check_stubs: Option<&str>,
         dataclass_registry: Option<&Bound<'_, PyList>>,
+        python_version: Option<&str>,
     ) -> PyResult<Self> {
         let input_names = list_str(inputs, "inputs")?;
         let external_function_names = list_str(external_functions, "external_functions")?;
+        let py_version = parse_python_version(python_version)?;
 
         if type_check {
-            py_type_check(py, &code, script_name, type_check_stubs)?;
+            py_type_check(py, &code, script_name, type_check_stubs, py_version)?;
         }
 
         // Create the snapshot (parses the code)
-        let runner = MontyRun::new(code, script_name, input_names.clone(), external_function_names.clone())
-            .map_err(|e| MontyError::new_err(py, e))?;
+        let runner = MontyRun::with_version(
+            code,
+            script_name,
+            input_names.clone(),
+            external_function_names.clone(),
+            py_version,
+        )
+        .map_err(|e| MontyError::new_err(py, e))?;
 
         Ok(Self {
             runner,
@@ -119,7 +129,13 @@ impl PyMonty {
     /// * `MontyTypingError` if type errors are found
     #[pyo3(signature = (prefix_code=None))]
     fn type_check(&self, py: Python<'_>, prefix_code: Option<&str>) -> PyResult<()> {
-        py_type_check(py, self.runner.code(), &self.script_name, prefix_code)
+        py_type_check(
+            py,
+            self.runner.code(),
+            &self.script_name,
+            prefix_code,
+            self.runner.python_version(),
+        )
     }
 
     /// Executes the code and returns the result.
@@ -290,16 +306,40 @@ impl PyMonty {
     }
 }
 
-fn py_type_check(py: Python<'_>, code: &str, script_name: &str, type_stubs: Option<&str>) -> PyResult<()> {
+fn py_type_check(
+    py: Python<'_>,
+    code: &str,
+    script_name: &str,
+    type_stubs: Option<&str>,
+    python_version: PythonVersion,
+) -> PyResult<()> {
     let type_stubs = type_stubs.map(|type_stubs| SourceFile::new(type_stubs, "type_stubs.pyi"));
 
-    let opt_diagnostics =
-        type_check(&SourceFile::new(code, script_name), type_stubs.as_ref()).map_err(PyRuntimeError::new_err)?;
+    let opt_diagnostics = type_check(
+        &SourceFile::new(code, script_name),
+        type_stubs.as_ref(),
+        python_version.to_ruff(),
+    )
+    .map_err(PyRuntimeError::new_err)?;
 
     if let Some(diagnostic) = opt_diagnostics {
         Err(MontyTypingError::new_err(py, diagnostic))
     } else {
         Ok(())
+    }
+}
+
+/// Parses a `"major.minor"` string into a `PythonVersion`, defaulting to 3.14.
+///
+/// Returns `PyValueError` if the string is not a supported Python version.
+fn parse_python_version(version: Option<&str>) -> PyResult<PythonVersion> {
+    match version {
+        None => Ok(PythonVersion::default()),
+        Some(s) => PythonVersion::from_str_opt(s).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "unsupported python_version '{s}', expected one of: '3.10', '3.11', '3.12', '3.13', '3.14'"
+            ))
+        }),
     }
 }
 

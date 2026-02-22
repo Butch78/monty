@@ -6,16 +6,23 @@
 //! - `platform`: Platform identifier ("monty")
 //! - `stdout`: Marker for standard output (no real functionality)
 //! - `stderr`: Marker for standard error (no real functionality)
+//!
+//! The version values are derived from the [`PythonVersion`](crate::python_version::PythonVersion)
+//! stored in `Interns`, which defaults to Python 3.14 but can be configured
+//! when creating a [`MontyRun`](crate::run::MontyRun).
 
 use crate::{
     heap::{Heap, HeapData, HeapId},
     intern::{Interns, StaticStrings},
     resource::{ResourceError, ResourceTracker},
-    types::{Module, NamedTuple},
+    types::{Module, NamedTuple, Str},
     value::{Marker, Value},
 };
 
 /// Creates the `sys` module and allocates it on the heap.
+///
+/// The version information (`sys.version`, `sys.version_info`) is derived from
+/// the Python version configured in `interns`.
 ///
 /// Returns a HeapId pointing to the newly allocated module.
 ///
@@ -42,14 +49,14 @@ pub fn create_module(heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -
         interns,
     );
 
-    // sys.version
-    module.set_attr(
-        StaticStrings::Version,
-        StaticStrings::MontyVersionString.into(),
-        heap,
-        interns,
-    );
-    // sys.version_info - named tuple (major=3, minor=14, micro=0, releaselevel='final', serial=0)
+    let py_version = interns.python_version();
+
+    // sys.version - heap-allocated string like "3.14.0 (Monty)"
+    let version_str = Str::new(py_version.version_string());
+    let version_id = heap.allocate(HeapData::Str(version_str))?;
+    module.set_attr(StaticStrings::Version, Value::Ref(version_id), heap, interns);
+
+    // sys.version_info - named tuple (major, minor, micro, releaselevel, serial)
     let version_info = NamedTuple::new(
         StaticStrings::SysVersionInfo,
         vec![
@@ -60,8 +67,8 @@ pub fn create_module(heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -
             StaticStrings::Serial.into(),
         ],
         vec![
-            Value::Int(3),
-            Value::Int(14),
+            Value::Int(i64::from(py_version.major())),
+            Value::Int(i64::from(py_version.minor())),
             Value::Int(0),
             Value::InternString(StaticStrings::Final.into()),
             Value::Int(0),

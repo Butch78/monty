@@ -14,6 +14,7 @@ use crate::{
     os::OsFunction,
     parse::parse,
     prepare::prepare,
+    python_version::PythonVersion,
     resource::{NoLimitTracker, ResourceTracker},
     value::Value,
 };
@@ -49,6 +50,7 @@ impl MontyRun {
     /// * `code` - The Python code to execute
     /// * `script_name` - The script name for error messages
     /// * `input_names` - Names of input variables
+    /// * `external_functions` - Names of external functions the code can call
     ///
     /// # Errors
     /// Returns `MontyException` if the code cannot be parsed.
@@ -58,7 +60,45 @@ impl MontyRun {
         input_names: Vec<String>,
         external_functions: Vec<String>,
     ) -> Result<Self, MontyException> {
-        Executor::new(code, script_name, input_names, external_functions).map(|executor| Self { executor })
+        Self::with_version(
+            code,
+            script_name,
+            input_names,
+            external_functions,
+            PythonVersion::default(),
+        )
+    }
+
+    /// Creates a new run snapshot targeting a specific Python version.
+    ///
+    /// Same as [`MontyRun::new`] but allows specifying the Python version that
+    /// `sys.version_info` and `sys.version` will report, and that the type checker
+    /// will target.
+    ///
+    /// # Arguments
+    /// * `code` - The Python code to execute
+    /// * `script_name` - The script name for error messages
+    /// * `input_names` - Names of input variables
+    /// * `external_functions` - Names of external functions the code can call
+    /// * `python_version` - The Python version to target
+    ///
+    /// # Errors
+    /// Returns `MontyException` if the code cannot be parsed.
+    pub fn with_version(
+        code: String,
+        script_name: &str,
+        input_names: Vec<String>,
+        external_functions: Vec<String>,
+        python_version: PythonVersion,
+    ) -> Result<Self, MontyException> {
+        Executor::new(code, script_name, input_names, external_functions, python_version)
+            .map(|executor| Self { executor })
+    }
+
+    /// Returns the Python version this runner targets.
+    #[must_use]
+    pub fn python_version(&self) -> PythonVersion {
+        self.executor.python_version
     }
 
     /// Returns the code that was parsed to create this snapshot.
@@ -742,6 +782,8 @@ struct Executor {
     /// Estimated heap capacity for pre-allocation on subsequent runs.
     /// Uses AtomicUsize for thread-safety (required by PyO3's Sync bound).
     heap_capacity: AtomicUsize,
+    /// The Python version this executor targets, used for `sys.version_info` and type checking.
+    python_version: PythonVersion,
 }
 
 impl Clone for Executor {
@@ -755,17 +797,20 @@ impl Clone for Executor {
             external_function_ids: self.external_function_ids.clone(),
             code: self.code.clone(),
             heap_capacity: AtomicUsize::new(self.heap_capacity.load(Ordering::Relaxed)),
+            python_version: self.python_version,
         }
     }
 }
 
 impl Executor {
-    /// Creates a new executor with the given code, filename, input names, and external functions.
+    /// Creates a new executor with the given code, filename, input names, external functions,
+    /// and target Python version.
     fn new(
         code: String,
         script_name: &str,
         input_names: Vec<String>,
         external_functions: Vec<String>,
+        python_version: PythonVersion,
     ) -> Result<Self, MontyException> {
         let parse_result = parse(&code, script_name).map_err(|e| e.into_python_exc(script_name, &code))?;
         let prepared = prepare(parse_result, input_names, &external_functions)
@@ -776,6 +821,7 @@ impl Executor {
 
         // Create interns with empty functions (functions will be set after compilation)
         let mut interns = Interns::new(prepared.interner, Vec::new(), external_functions);
+        interns.set_python_version(python_version);
 
         // Compile the module to bytecode, which also compiles all nested functions
         let namespace_size_u16 = u16::try_from(prepared.namespace_size).expect("module namespace size exceeds u16");
@@ -794,6 +840,7 @@ impl Executor {
             external_function_ids,
             code,
             heap_capacity: AtomicUsize::new(prepared.namespace_size),
+            python_version,
         })
     }
 
