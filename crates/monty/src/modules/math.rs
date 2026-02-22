@@ -205,7 +205,7 @@ fn math_sqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
 
     let f = value_to_float(value, "math.sqrt", heap)?;
     if f < 0.0 {
-        Err(SimpleException::new_msg(ExcType::ValueError, format!("expected a nonnegative input, got {f}")).into())
+        Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into())
     } else {
         Ok(Value::Float(f.sqrt()))
     }
@@ -261,19 +261,23 @@ fn math_log(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
 
     let x = value_to_float(x_val, "math.log", heap)?;
     if x <= 0.0 {
-        return Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into());
+        return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
     }
 
     match base_val {
         Some(base_v) => {
             let base = value_to_float(base_v, "math.log", heap)?;
-            // base == 1.0 causes division by zero in log(x)/log(base)
+            // base == 1.0 causes division by zero in log(x)/log(base), matching
+            // CPython which raises ZeroDivisionError for this case.
             #[expect(
                 clippy::float_cmp,
                 reason = "exact comparison with 1.0 is intentional — log(1.0) is exactly 0.0"
             )]
-            if base <= 0.0 || base == 1.0 {
-                return Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into());
+            if base == 1.0 {
+                return Err(SimpleException::new_msg(ExcType::ZeroDivisionError, "float division by zero").into());
+            }
+            if base <= 0.0 {
+                return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
             }
             Ok(Value::Float(x.ln() / base.ln()))
         }
@@ -282,26 +286,32 @@ fn math_log(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
 }
 
 /// `math.log2(x)` — returns the base-2 logarithm of x.
+///
+/// Returns `inf` for positive infinity, `nan` for NaN.
+/// Raises `ValueError` for non-positive finite inputs.
 fn math_log2(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
     let value = args.get_one_arg("math.log2", heap)?;
     defer_drop!(value, heap);
 
     let f = value_to_float(value, "math.log2", heap)?;
     if f <= 0.0 {
-        Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into())
+        Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into())
     } else {
         Ok(Value::Float(f.log2()))
     }
 }
 
 /// `math.log10(x)` — returns the base-10 logarithm of x.
+///
+/// Returns `inf` for positive infinity, `nan` for NaN.
+/// Raises `ValueError` for non-positive finite inputs.
 fn math_log10(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
     let value = args.get_one_arg("math.log10", heap)?;
     defer_drop!(value, heap);
 
     let f = value_to_float(value, "math.log10", heap)?;
     if f <= 0.0 {
-        Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into())
+        Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into())
     } else {
         Ok(Value::Float(f.log10()))
     }
