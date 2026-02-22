@@ -392,7 +392,12 @@ fn math_lcm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let abs_b = b.unsigned_abs();
     let g = gcd(abs_a, abs_b);
     // lcm(a, b) = |a| / gcd(a,b) * |b| — dividing first avoids intermediate overflow
-    Ok(Value::Int((abs_a / g * abs_b).cast_signed()))
+    let lcm_u = (abs_a / g)
+        .checked_mul(abs_b)
+        .ok_or_else(|| {
+            SimpleException::new_msg(ExcType::OverflowError, "integer overflow in lcm")
+        })?;
+    Ok(Value::Int(lcm_u.cast_signed()))
 }
 
 /// `math.copysign(x, y)` — returns x with the sign of y.
