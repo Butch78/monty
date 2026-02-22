@@ -46,9 +46,11 @@ assert d.get('z', 42) == 42, 'dict get missing with default'
 assert sorted(d.keys()) == ['a', 'b', 'c'], 'dict keys sorted'
 assert sorted(d.values()) == [1, 2, 3], 'dict values sorted'
 
-# .items() - check len and membership
+# .items() - check len and sorted
 items = list(d.items())
 assert len(items) == 3, 'dict items length'
+items.sort()
+assert items == [('a', 1), ('b', 2), ('c', 3)], 'dict items sorted'
 
 # .pop()
 d2 = {'x': 10, 'y': 20}

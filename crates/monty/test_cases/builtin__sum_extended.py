@@ -40,3 +40,9 @@ assert sum({10: 'a', 20: 'b'}) == 30, 'sum of dict keys'
 
 # sum with float start and int values
 assert sum([1, 2, 3], 0.0) == 6.0, 'sum int list with float start'
+
+# sum with bools (True=1, False=0)
+assert sum([True, True, False]) == 2, 'sum of bools'
+assert sum([True, True, True]) == 3, 'sum all True'
+assert sum([False, False]) == 0, 'sum all False'
+assert sum([True, 1, 2]) == 4, 'sum mixed bool and int'

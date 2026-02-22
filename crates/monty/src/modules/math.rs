@@ -394,9 +394,7 @@ fn math_lcm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     // lcm(a, b) = |a| / gcd(a,b) * |b| — dividing first avoids intermediate overflow
     let lcm_u = (abs_a / g)
         .checked_mul(abs_b)
-        .ok_or_else(|| {
-            SimpleException::new_msg(ExcType::OverflowError, "integer overflow in lcm")
-        })?;
+        .ok_or_else(|| SimpleException::new_msg(ExcType::OverflowError, "integer overflow in lcm"))?;
     Ok(Value::Int(lcm_u.cast_signed()))
 }
 

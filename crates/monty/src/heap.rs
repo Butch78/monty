@@ -463,6 +463,39 @@ impl PyTrait for HeapData {
         }
     }
 
+    /// Ordering comparison for heap-allocated values.
+    ///
+    /// Dispatches to the type-specific `py_cmp` for containers (Tuple, List)
+    /// and leaf types (LongInt, Str, Bytes). Returns `Ok(None)` for types
+    /// that don't support ordering (dicts, sets, etc.).
+    fn py_cmp(
+        &self,
+        other: &Self,
+        heap: &mut Heap<impl ResourceTracker>,
+        guard: &mut DepthGuard,
+        interns: &Interns,
+    ) -> Result<Option<std::cmp::Ordering>, ResourceError> {
+        match (self, other) {
+            (Self::LongInt(a), Self::LongInt(b)) => Ok(a.inner().partial_cmp(b.inner())),
+            (Self::Str(a), Self::Str(b)) => Ok(a.as_str().partial_cmp(b.as_str())),
+            (Self::Bytes(a), Self::Bytes(b)) => Ok(a.as_slice().partial_cmp(b.as_slice())),
+            (Self::Tuple(a), Self::Tuple(b)) => a.py_cmp(b, heap, guard, interns),
+            (Self::List(a), Self::List(b)) => a.py_cmp(b, heap, guard, interns),
+            // NamedTuple compares with itself and with Tuple (matching CPython behavior)
+            (Self::NamedTuple(a), Self::NamedTuple(b)) => seq_py_cmp(a.as_vec(), b.as_vec(), heap, guard, interns),
+            (Self::NamedTuple(nt), Self::Tuple(t)) | (Self::Tuple(t), Self::NamedTuple(nt)) => {
+                // For NamedTuple vs Tuple, compare by element order
+                // Note: comparison order matters — if nt is on the left, compare nt < t
+                if matches!(self, Self::NamedTuple(_)) {
+                    seq_py_cmp(nt.as_vec(), t.as_slice(), heap, guard, interns)
+                } else {
+                    seq_py_cmp(t.as_slice(), nt.as_vec(), heap, guard, interns)
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
     fn py_dec_ref_ids(&mut self, stack: &mut Vec<HeapId>) {
         match self {
             Self::Str(s) => s.py_dec_ref_ids(stack),
@@ -783,6 +816,40 @@ impl PyTrait for HeapData {
             _ => Ok(None),
         }
     }
+}
+
+/// Lexicographic ordering comparison for two sequences of values.
+///
+/// Used by `HeapData::py_cmp` to compare tuples, lists, and namedtuples
+/// without duplicating the element-wise comparison logic. Uses `py_eq`
+/// to find the first differing pair, then `py_cmp` on that pair. If all
+/// compared elements are equal, compares by length.
+fn seq_py_cmp(
+    left: &[Value],
+    right: &[Value],
+    heap: &mut Heap<impl ResourceTracker>,
+    guard: &mut DepthGuard,
+    interns: &Interns,
+) -> Result<Option<std::cmp::Ordering>, ResourceError> {
+    guard.increase_err()?;
+
+    let min_len = left.len().min(right.len());
+    for i in 0..min_len {
+        heap.check_time()?;
+        let a = &left[i];
+        let b = &right[i];
+
+        if a.py_eq(b, heap, guard, interns)? {
+            continue;
+        }
+
+        let result = a.py_cmp(b, heap, guard, interns)?;
+        guard.decrease();
+        return Ok(result);
+    }
+
+    guard.decrease();
+    Ok(left.len().partial_cmp(&right.len()))
 }
 
 /// Hash caching state stored alongside each heap entry.

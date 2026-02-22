@@ -14,7 +14,7 @@
 /// - `count(value)` - Count occurrences
 ///
 /// All tuple methods from Python's builtins are implemented.
-use std::fmt::Write;
+use std::{cmp::Ordering, fmt::Write};
 
 use ahash::AHashSet;
 use smallvec::SmallVec;
@@ -218,6 +218,46 @@ impl PyTrait for Tuple {
         }
         guard.decrease();
         Ok(true)
+    }
+
+    /// Lexicographic ordering comparison for tuples.
+    ///
+    /// Compares element-by-element: uses `py_eq` to find the first differing pair,
+    /// then uses `py_cmp` on that pair to determine ordering. If all compared
+    /// elements are equal, the shorter tuple is "less than" the longer one.
+    ///
+    /// This matches CPython's `tuplerichcompare` behavior: equality is checked
+    /// first so that types supporting `==` but not `<` (e.g., dicts) only raise
+    /// errors when they are the first differing element.
+    fn py_cmp(
+        &self,
+        other: &Self,
+        heap: &mut Heap<impl ResourceTracker>,
+        guard: &mut DepthGuard,
+        interns: &Interns,
+    ) -> Result<Option<Ordering>, ResourceError> {
+        guard.increase_err()?;
+
+        let min_len = self.items.len().min(other.items.len());
+        for i in 0..min_len {
+            heap.check_time()?;
+            let a = &self.items[i];
+            let b = &other.items[i];
+
+            // Check equality first (handles types that support == but not <)
+            if a.py_eq(b, heap, guard, interns)? {
+                continue;
+            }
+
+            // Elements differ — compare them for ordering
+            let result = a.py_cmp(b, heap, guard, interns)?;
+            guard.decrease();
+            return Ok(result);
+        }
+
+        // All compared elements are equal — compare by length
+        guard.decrease();
+        Ok(self.items.len().partial_cmp(&other.items.len()))
     }
 
     fn py_add(

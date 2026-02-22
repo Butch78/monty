@@ -73,3 +73,13 @@ assert max('b', 'a', 'c') == 'c', 'max string args'
 # min/max with float list
 assert min([1.5, 0.5, 2.5]) == 0.5, 'min float list'
 assert max([1.5, 0.5, 2.5]) == 2.5, 'max float list'
+
+# min/max with tuples
+assert min((1, 3), (1, 2)) == (1, 2), 'min tuples'
+assert max((1, 3), (1, 2)) == (1, 3), 'max tuples'
+assert min((0,), (1,), (2,)) == (0,), 'min three tuples'
+assert max((0,), (1,), (2,)) == (2,), 'max three tuples'
+
+# min/max with lists
+assert min([1, 3], [1, 2]) == [1, 2], 'min lists'
+assert max([1, 3], [1, 2]) == [1, 3], 'max lists'
