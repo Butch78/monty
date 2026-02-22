@@ -17,6 +17,7 @@ use crate::{
 };
 
 pub(crate) mod asyncio;
+pub(crate) mod math;
 pub(crate) mod os;
 pub(crate) mod pathlib;
 pub(crate) mod sys;
@@ -36,6 +37,8 @@ pub(crate) enum BuiltinModule {
     Pathlib,
     /// The `os` module providing operating system interface (only `getenv()` implemented).
     Os,
+    /// The `math` module providing mathematical functions and constants.
+    Math,
 }
 
 impl BuiltinModule {
@@ -47,6 +50,7 @@ impl BuiltinModule {
             StaticStrings::Asyncio => Some(Self::Asyncio),
             StaticStrings::Pathlib => Some(Self::Pathlib),
             StaticStrings::Os => Some(Self::Os),
+            StaticStrings::Math => Some(Self::Math),
             _ => None,
         }
     }
@@ -65,6 +69,7 @@ impl BuiltinModule {
             Self::Asyncio => asyncio::create_module(heap, interns),
             Self::Pathlib => pathlib::create_module(heap, interns),
             Self::Os => os::create_module(heap, interns),
+            Self::Math => math::create_module(heap, interns),
         }
     }
 }
@@ -73,6 +78,7 @@ impl BuiltinModule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ModuleFunctions {
     Asyncio(asyncio::AsyncioFunctions),
+    Math(math::MathFunctions),
     Os(os::OsFunctions),
 }
 
@@ -80,6 +86,7 @@ impl fmt::Display for ModuleFunctions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Asyncio(func) => write!(f, "{func}"),
+            Self::Math(func) => write!(f, "{func}"),
             Self::Os(func) => write!(f, "{func}"),
         }
     }
@@ -93,6 +100,7 @@ impl ModuleFunctions {
     pub fn call(self, heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<AttrCallResult> {
         match self {
             Self::Asyncio(functions) => asyncio::call(heap, functions, args),
+            Self::Math(functions) => math::call(heap, functions, args).map(AttrCallResult::Value),
             Self::Os(functions) => os::call(heap, functions, args),
         }
     }
