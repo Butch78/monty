@@ -58,13 +58,10 @@ pub(crate) fn binary_set_op(
         return Ok(None);
     }
 
-    // Copy entries from both sets to break the heap borrow, then increment
-    // refcounts on the copies. This is the same pattern used by the method
-    // versions (e.g. `union_from_value`).
+    // Clone entries from both sets, breaking the heap borrow. `clone_entries`
+    // increments refcounts on each value so the copies are properly owned.
     let lhs_entries = extract_set_entries(lhs_id, heap);
     let rhs_entries = extract_set_entries(rhs_id, heap);
-    SetStorage::inc_refs_for_entries(&lhs_entries, heap);
-    SetStorage::inc_refs_for_entries(&rhs_entries, heap);
     let lhs_storage = SetStorage::from_entries(lhs_entries);
     let rhs_storage = SetStorage::from_entries(rhs_entries);
 
@@ -92,17 +89,17 @@ pub(crate) fn binary_set_op(
     Ok(Some(Value::Ref(heap_id)))
 }
 
-/// Extracts a copy of entries from a set-like heap value.
+/// Clones entries from a set-like heap value with proper reference counting.
 ///
-/// The returned entries have NOT had their refcounts incremented — the caller
-/// must call [`SetStorage::inc_refs_for_entries`] after the heap borrow is released.
+/// Each value in the returned entries has had its refcount incremented via
+/// `clone_entries`, so the caller owns these copies.
 ///
 /// # Panics
 /// Panics if the HeapId does not point to a Set or FrozenSet.
 fn extract_set_entries(id: HeapId, heap: &Heap<impl ResourceTracker>) -> Vec<(Value, u64)> {
     match heap.get(id) {
-        HeapData::Set(s) => s.0.copy_entries(),
-        HeapData::FrozenSet(s) => s.0.copy_entries(),
+        HeapData::Set(s) => s.0.clone_entries(heap),
+        HeapData::FrozenSet(s) => s.0.clone_entries(heap),
         _ => unreachable!("extract_set_entries called on non-set type"),
     }
 }

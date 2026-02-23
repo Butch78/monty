@@ -205,7 +205,11 @@ fn math_sqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
 
     let f = value_to_float(value, "math.sqrt", heap)?;
     if f < 0.0 {
-        Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into())
+        Err(SimpleException::new_msg(
+            ExcType::ValueError,
+            format!("expected a nonnegative input, got {f:?}"),
+        )
+        .into())
     } else {
         Ok(Value::Float(f.sqrt()))
     }
@@ -261,7 +265,7 @@ fn math_log(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
 
     let x = value_to_float(x_val, "math.log", heap)?;
     if x <= 0.0 {
-        return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
+        return Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into());
     }
 
     match base_val {
@@ -274,10 +278,10 @@ fn math_log(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
                 reason = "exact comparison with 1.0 is intentional — log(1.0) is exactly 0.0"
             )]
             if base == 1.0 {
-                return Err(SimpleException::new_msg(ExcType::ZeroDivisionError, "float division by zero").into());
+                return Err(SimpleException::new_msg(ExcType::ZeroDivisionError, "division by zero").into());
             }
             if base <= 0.0 {
-                return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
+                return Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into());
             }
             Ok(Value::Float(x.ln() / base.ln()))
         }
@@ -295,7 +299,7 @@ fn math_log2(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
 
     let f = value_to_float(value, "math.log2", heap)?;
     if f <= 0.0 {
-        Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into())
+        Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into())
     } else {
         Ok(Value::Float(f.log2()))
     }
@@ -311,7 +315,7 @@ fn math_log10(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
 
     let f = value_to_float(value, "math.log10", heap)?;
     if f <= 0.0 {
-        Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into())
+        Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into())
     } else {
         Ok(Value::Float(f.log10()))
     }

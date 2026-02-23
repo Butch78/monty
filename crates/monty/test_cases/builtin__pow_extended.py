@@ -21,12 +21,8 @@ except ValueError:
     threw = True
 assert threw, 'pow mod 0 raises ValueError'
 
-threw = False
-try:
-    pow(2, -1, 5)
-except ValueError:
-    threw = True
-assert threw, 'pow negative exp with mod raises ValueError'
+# Note: pow(2, -1, 5) computes modular inverse on CPython (returns 3),
+# but Monty doesn't support modular inverse yet — skipping this case.
 
 threw = False
 try:
