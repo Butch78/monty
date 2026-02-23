@@ -391,8 +391,9 @@ fn math_isqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
             break;
         }
     }
-    // Ensure we don't overshoot due to rounding
-    while x * x > n {
+    // Ensure we don't overshoot due to rounding.
+    // Use `x > n / x` instead of `x * x > n` to avoid i64 overflow for large n.
+    while x > n / x {
         x -= 1;
     }
     Ok(Value::Int(x))
@@ -1171,16 +1172,20 @@ fn math_frexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
         let n_bits = normalized.to_bits();
         let n_exp = ((n_bits >> 52) & 0x7ff) as i64;
         let n_mant = n_bits & 0x000f_ffff_ffff_ffff;
-        let exp = n_exp - 1023 - 52 - 53 + 1;
+        // Exponent: (biased_exp - 1022) gives the frexp exponent for normal numbers,
+        // minus 53 to compensate for the 2^53 normalization factor
+        let exp = n_exp - 1022 - 53;
         let m = f64::from_bits(sign | (0x3fe_u64 << 52) | n_mant);
         let tuple = allocate_tuple(smallvec![Value::Float(m), Value::Int(exp)], heap)?;
         return Ok(tuple);
     }
 
-    let exp = exponent_bits - 1023 - 52 + 1;
+    // For normal numbers: frexp exponent = biased_exponent - 1022
+    // (1022 = IEEE 754 bias 1023 minus 1, since mantissa is in [0.5, 1.0) not [1.0, 2.0))
+    let exp = exponent_bits - 1022;
     let m = f64::from_bits(sign | (0x3fe_u64 << 52) | mantissa_bits);
 
-    let tuple = allocate_tuple(smallvec![Value::Float(m), Value::Int(exp + 52)], heap)?;
+    let tuple = allocate_tuple(smallvec![Value::Float(m), Value::Int(exp)], heap)?;
     Ok(tuple)
 }
 
@@ -1350,6 +1355,10 @@ fn float_to_int_checked(rounded: f64, original: f64) -> RunResult<Value> {
 ///
 /// Accepts `Float`, `Int`, and `Bool` values. For other types, raises a `TypeError`
 /// with a message matching CPython's format: "must be real number, not <type>".
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "i64-to-f64 can lose precision for large integers (beyond 2^53), but this matches CPython's conversion semantics"
+)]
 fn value_to_float(value: &Value, _func_name: &str, heap: &Heap<impl ResourceTracker>) -> RunResult<f64> {
     match value {
         Value::Float(f) => Ok(*f),
