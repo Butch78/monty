@@ -1463,9 +1463,9 @@ fn gamma_impl(x: f64) -> f64 {
     if x.is_nan() || x == f64::INFINITY {
         return x;
     }
-    if x == f64::NEG_INFINITY {
-        return f64::NAN;
-    }
+    // Note: NEG_INFINITY and non-positive integer poles are handled by `math_gamma`
+    // before this function is called, so we don't need to guard against them here.
+
     // For positive integers, return exact factorial
     if x > 0.0 && x == x.floor() && x <= 21.0 {
         let n = x as u64;
@@ -1478,9 +1478,6 @@ fn gamma_impl(x: f64) -> f64 {
     if x < 0.5 {
         // Reflection formula: Γ(x) = π / (sin(πx) · Γ(1-x))
         let sin_px = (std::f64::consts::PI * x).sin();
-        if sin_px == 0.0 {
-            return f64::INFINITY; // poles at non-positive integers
-        }
         return std::f64::consts::PI / (sin_px * gamma_impl(1.0 - x));
     }
     lanczos_gamma(x)
@@ -1541,10 +1538,9 @@ fn lgamma_impl(x: f64) -> f64 {
     }
     if x < 0.5 {
         // Reflection: ln|Γ(x)| = ln(π) - ln|sin(πx)| - ln|Γ(1-x)|
+        // Note: non-positive integer poles are handled by `math_lgamma` before
+        // this function is called, so sin_px is always non-zero here.
         let sin_px = (std::f64::consts::PI * x).sin().abs();
-        if sin_px == 0.0 {
-            return f64::INFINITY;
-        }
         return std::f64::consts::PI.ln() - sin_px.ln() - lgamma_impl(1.0 - x);
     }
     lanczos_lgamma(x)

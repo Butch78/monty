@@ -135,6 +135,14 @@ assert math.isqrt(10) == 3, 'isqrt(10)'
 assert math.isqrt(99) == 9, 'isqrt(99)'
 assert math.isqrt(100) == 10, 'isqrt(100)'
 assert math.isqrt(True) == 1, 'isqrt(True)'
+# Large values that trigger Newton's method refinement in the integer square root
+# (f64 sqrt estimate is imprecise for values near i64 max)
+assert math.isqrt(10**18) == 1000000000, 'isqrt(10**18)'
+assert math.isqrt(2**62) == 2147483648, 'isqrt(2**62)'
+assert math.isqrt(9223372030926249001) == 3037000499, 'isqrt(large perfect square near i64 max)'
+# Verify the isqrt contract: r*r <= n
+r = math.isqrt(2**62)
+assert r * r <= 2**62, 'isqrt(2**62) contract: r*r <= n'
 
 threw = False
 try:
@@ -975,6 +983,10 @@ assert math.fmod(3, float('inf')) == 3.0, 'fmod(3, inf)'
 assert math.isnan(math.fmod(float('nan'), 3)), 'fmod(nan, 3) is nan'
 assert math.isnan(math.fmod(3, float('nan'))), 'fmod(3, nan) is nan'
 assert math.isnan(math.fmod(float('nan'), float('nan'))), 'fmod(nan, nan) is nan'
+# NaN propagation when x is infinite and y is NaN (covers the fallthrough in the domain check)
+assert math.isnan(math.fmod(float('inf'), float('nan'))), 'fmod(inf, nan) is nan'
+# NaN propagation when x is NaN and y is 0 (y==0 branch but NaN overrides)
+assert math.isnan(math.fmod(float('nan'), 0.0)), 'fmod(nan, 0) is nan'
 
 threw = False
 try:
@@ -1064,6 +1076,11 @@ r = math.frexp(float('-inf'))
 assert r == (float('-inf'), 0), 'frexp(-inf)'
 r_nan = math.frexp(float('nan'))
 assert math.isnan(r_nan[0]) and r_nan[1] == 0, 'frexp(nan)'
+# Subnormal float handling (covers the exponent_bits == 0 branch)
+r = math.frexp(5e-324)
+assert r == (0.5, -1073), 'frexp(5e-324) smallest subnormal'
+r = math.frexp(-5e-324)
+assert r == (-0.5, -1073), 'frexp(-5e-324) negative smallest subnormal'
 
 threw = False
 try:
@@ -1080,6 +1097,11 @@ assert math.ldexp(1.0, -1075) == 0.0, 'ldexp(1.0, -1075) underflows to 0'
 assert math.ldexp(float('inf'), 1) == float('inf'), 'ldexp(inf, 1)'
 assert math.isnan(math.ldexp(float('nan'), 1)), 'ldexp(nan, 1) is nan'
 assert math.ldexp(0.0, 1000) == 0.0, 'ldexp(0.0, 1000)'
+# Moderate negative exponents (covers the negative exponent scaling loop)
+assert math.ldexp(1.0, -1) == 0.5, 'ldexp(1.0, -1)'
+assert math.ldexp(1.0, -10) == 0.0009765625, 'ldexp(1.0, -10)'
+assert math.ldexp(2.0, -3) == 0.25, 'ldexp(2.0, -3)'
+assert math.ldexp(1.0, -1074) == 5e-324, 'ldexp(1.0, -1074) smallest subnormal'
 
 threw = False
 try:
@@ -1108,6 +1130,10 @@ assert math.gamma(5) == 24.0, 'gamma(5)'
 assert math.isclose(math.gamma(0.5), math.sqrt(math.pi)), 'gamma(0.5)'
 assert math.gamma(float('inf')) == float('inf'), 'gamma(inf)'
 assert math.isnan(math.gamma(float('nan'))), 'gamma(nan) is nan'
+# Negative non-integer arguments (covers the reflection formula in gamma_impl)
+assert math.isclose(math.gamma(-0.5), -3.544907701811032), 'gamma(-0.5)'
+assert math.isclose(math.gamma(-1.5), 2.3632718012073544), 'gamma(-1.5)'
+assert math.isclose(math.gamma(-2.5), -0.9453087204829417), 'gamma(-2.5)'
 
 threw = False
 try:
@@ -1150,6 +1176,18 @@ assert math.isclose(math.lgamma(5), math.log(24)), 'lgamma(5)'
 assert math.lgamma(float('inf')) == float('inf'), 'lgamma(inf)'
 assert math.isnan(math.lgamma(float('nan'))), 'lgamma(nan) is nan'
 assert math.isclose(math.lgamma(-0.5), 1.265512123484645), 'lgamma(-0.5)'
+# lgamma(-inf) returns inf (covers the NEG_INFINITY branch in lgamma_impl)
+assert math.lgamma(float('-inf')) == float('inf'), 'lgamma(-inf) is inf'
+# lgamma with negative non-integer (covers the reflection formula in lgamma_impl)
+assert math.isclose(math.lgamma(-1.5), 0.8600470153764812), 'lgamma(-1.5)'
+
+# lgamma overflow for very large finite input
+threw = False
+try:
+    math.lgamma(1e308)
+except OverflowError:
+    threw = True
+assert threw, 'lgamma(1e308) raises OverflowError'
 
 threw = False
 try:
