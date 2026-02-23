@@ -349,11 +349,7 @@ fn math_sqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
 
     let f = value_to_float(value, "math.sqrt", heap)?;
     if f < 0.0 {
-        Err(SimpleException::new_msg(
-            ExcType::ValueError,
-            format!("expected a nonnegative input, got {f:?}"),
-        )
-        .into())
+        Err(SimpleException::new_msg(ExcType::ValueError, format!("expected a nonnegative input, got {f:?}")).into())
     } else {
         Ok(Value::Float(f.sqrt()))
     }
@@ -369,9 +365,7 @@ fn math_isqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
 
     let n = value_to_int(value, "math.isqrt", heap)?;
     if n < 0 {
-        return Err(
-            SimpleException::new_msg(ExcType::ValueError, "isqrt() argument must be nonnegative").into(),
-        );
+        return Err(SimpleException::new_msg(ExcType::ValueError, "isqrt() argument must be nonnegative").into());
     }
     if n == 0 {
         return Ok(Value::Int(0));
@@ -435,9 +429,7 @@ fn math_pow(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     if result.is_infinite() && x.is_finite() && y.is_finite() {
         // 0**negative is a domain error (ValueError), not overflow
         if x == 0.0 && y < 0.0 {
-            return Err(
-                SimpleException::new_msg(ExcType::ValueError, "math domain error").into(),
-            );
+            return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
         }
         return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
     }
@@ -501,9 +493,7 @@ fn math_log(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
 
     let x = value_to_float(x_val, "math.log", heap)?;
     if x <= 0.0 {
-        return Err(
-            SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into(),
-        );
+        return Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into());
     }
 
     match base_val {
@@ -516,16 +506,10 @@ fn math_log(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
                 reason = "exact comparison with 1.0 is intentional — log(1.0) is exactly 0.0"
             )]
             if base == 1.0 {
-                return Err(
-                    SimpleException::new_msg(ExcType::ZeroDivisionError, "division by zero")
-                        .into(),
-                );
+                return Err(SimpleException::new_msg(ExcType::ZeroDivisionError, "division by zero").into());
             }
             if base <= 0.0 {
-                return Err(
-                    SimpleException::new_msg(ExcType::ValueError, "expected a positive input")
-                        .into(),
-                );
+                return Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into());
             }
             Ok(Value::Float(x.ln() / base.ln()))
         }
@@ -543,11 +527,9 @@ fn math_log1p(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
 
     let f = value_to_float(value, "math.log1p", heap)?;
     if f <= -1.0 {
-        return Err(SimpleException::new_msg(
-            ExcType::ValueError,
-            format!("expected argument value > -1, got {f:?}"),
-        )
-        .into());
+        return Err(
+            SimpleException::new_msg(ExcType::ValueError, format!("expected argument value > -1, got {f:?}")).into(),
+        );
     }
     Ok(Value::Float(f.ln_1p()))
 }
@@ -957,8 +939,7 @@ fn math_factorial(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> Run
                 // Overflow — for simplicity, return an error for very large factorials
                 // since we don't have LongInt factorial support yet
                 return Err(
-                    SimpleException::new_msg(ExcType::OverflowError, "int too large to convert to factorial")
-                        .into(),
+                    SimpleException::new_msg(ExcType::OverflowError, "int too large to convert to factorial").into(),
                 );
             }
         }
@@ -1017,14 +998,10 @@ fn math_comb(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let k = value_to_int(k_val, "math.comb", heap)?;
 
     if n < 0 {
-        return Err(
-            SimpleException::new_msg(ExcType::ValueError, "n must be a non-negative integer").into(),
-        );
+        return Err(SimpleException::new_msg(ExcType::ValueError, "n must be a non-negative integer").into());
     }
     if k < 0 {
-        return Err(
-            SimpleException::new_msg(ExcType::ValueError, "k must be a non-negative integer").into(),
-        );
+        return Err(SimpleException::new_msg(ExcType::ValueError, "k must be a non-negative integer").into());
     }
     if k > n {
         return Ok(Value::Int(0));
@@ -1038,9 +1015,7 @@ fn math_comb(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
         match result.checked_mul(n - i) {
             Some(v) => result = v / (i + 1),
             None => {
-                return Err(
-                    SimpleException::new_msg(ExcType::OverflowError, "integer overflow in comb").into(),
-                );
+                return Err(SimpleException::new_msg(ExcType::OverflowError, "integer overflow in comb").into());
             }
         }
     }
@@ -1059,14 +1034,10 @@ fn math_perm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let k = value_to_int(k_val, "math.perm", heap)?;
 
     if n < 0 {
-        return Err(
-            SimpleException::new_msg(ExcType::ValueError, "n must be a non-negative integer").into(),
-        );
+        return Err(SimpleException::new_msg(ExcType::ValueError, "n must be a non-negative integer").into());
     }
     if k < 0 {
-        return Err(
-            SimpleException::new_msg(ExcType::ValueError, "k must be a non-negative integer").into(),
-        );
+        return Err(SimpleException::new_msg(ExcType::ValueError, "k must be a non-negative integer").into());
     }
     if k > n {
         return Ok(Value::Int(0));
@@ -1077,9 +1048,7 @@ fn math_perm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
         match result.checked_mul(n - i) {
             Some(v) => result = v,
             None => {
-                return Err(
-                    SimpleException::new_msg(ExcType::OverflowError, "integer overflow in perm").into(),
-                );
+                return Err(SimpleException::new_msg(ExcType::OverflowError, "integer overflow in perm").into());
             }
         }
     }
@@ -1106,9 +1075,7 @@ fn math_fmod(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
         // CPython raises for both fmod(x, 0) and fmod(inf, y)
         // but NaN inputs propagate
         if !x.is_nan() && !y.is_nan() {
-            return Err(
-                SimpleException::new_msg(ExcType::ValueError, "math domain error").into(),
-            );
+            return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
         }
     }
     Ok(Value::Float(x % y))
@@ -1241,11 +1208,7 @@ fn math_ldexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
         return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
     } else if i < -1074 {
         // Underflows to zero
-        if x > 0.0 {
-            0.0
-        } else {
-            -0.0
-        }
+        if x > 0.0 { 0.0 } else { -0.0 }
     } else {
         // Use successive doubling/halving to avoid intermediate overflow
         let mut result = x;
@@ -1279,7 +1242,10 @@ fn math_ldexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
 ///
 /// CPython 3.14 raises ValueError for non-positive integers:
 /// "expected a noninteger or positive integer, got <x>".
-#[expect(clippy::float_cmp, reason = "exact comparison detects integer poles of gamma function")]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact comparison detects integer poles of gamma function"
+)]
 fn math_gamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
     let value = args.get_one_arg("math.gamma", heap)?;
     defer_drop!(value, heap);
@@ -1310,7 +1276,10 @@ fn math_gamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
 }
 
 /// `math.lgamma(x)` — returns the natural log of the absolute value of Gamma(x).
-#[expect(clippy::float_cmp, reason = "exact comparison detects integer poles of gamma function")]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact comparison detects integer poles of gamma function"
+)]
 fn math_lgamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
     let value = args.get_one_arg("math.lgamma", heap)?;
     defer_drop!(value, heap);
@@ -1413,11 +1382,7 @@ fn value_to_int(value: &Value, _func_name: &str, heap: &Heap<impl ResourceTracke
 /// CPython 3.14 uses "expected a finite input, got inf" for trig functions.
 fn require_finite(f: f64) -> RunResult<()> {
     if f.is_infinite() {
-        Err(SimpleException::new_msg(
-            ExcType::ValueError,
-            format!("expected a finite input, got {f:?}"),
-        )
-        .into())
+        Err(SimpleException::new_msg(ExcType::ValueError, format!("expected a finite input, got {f:?}")).into())
     } else {
         Ok(())
     }
@@ -1444,11 +1409,7 @@ fn round_half_even(x: f64) -> f64 {
     if (x - rounded).abs() == 0.5 {
         // Round to even: if rounded is odd, go the other way
         let truncated = x.trunc();
-        if truncated % 2.0 == 0.0 {
-            truncated
-        } else {
-            rounded
-        }
+        if truncated % 2.0 == 0.0 { truncated } else { rounded }
     } else {
         rounded
     }
@@ -1474,11 +1435,7 @@ fn nextafter_impl(x: f64, y: f64) -> f64 {
         };
     }
     let bits = x.to_bits();
-    let result_bits = if (x < y) == (x > 0.0) {
-        bits + 1
-    } else {
-        bits - 1
-    };
+    let result_bits = if (x < y) == (x > 0.0) { bits + 1 } else { bits - 1 };
     f64::from_bits(result_bits)
 }
 
