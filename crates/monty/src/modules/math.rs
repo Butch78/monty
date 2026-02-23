@@ -428,11 +428,17 @@ fn math_pow(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let x = value_to_float(x_val, "math.pow", heap)?;
     let y = value_to_float(y_val, "math.pow", heap)?;
     let result = x.powf(y);
-    // CPython raises ValueError for 0**negative and for negative**non-integer
+    // CPython raises ValueError for domain errors: 0**negative, negative**non-integer
     if result.is_nan() && !x.is_nan() && !y.is_nan() {
         return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
     }
     if result.is_infinite() && x.is_finite() && y.is_finite() {
+        // 0**negative is a domain error (ValueError), not overflow
+        if x == 0.0 && y < 0.0 {
+            return Err(
+                SimpleException::new_msg(ExcType::ValueError, "math domain error").into(),
+            );
+        }
         return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
     }
     Ok(Value::Float(result))
@@ -704,7 +710,8 @@ fn math_ulp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     }
     let f = f.abs();
     if f == 0.0 {
-        return Ok(Value::Float(f64::MIN_POSITIVE));
+        // CPython returns the smallest positive subnormal: 5e-324
+        return Ok(Value::Float(f64::from_bits(1)));
     }
     // ULP = nextafter(f, inf) - f
     let next = nextafter_impl(f, f64::INFINITY);
@@ -755,7 +762,8 @@ fn math_asin(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     defer_drop!(value, heap);
 
     let f = value_to_float(value, "math.asin", heap)?;
-    if !(-1.0..=1.0).contains(&f) {
+    // NaN passes through (asin(nan) = nan), but out-of-range finite values raise
+    if !f.is_nan() && !(-1.0..=1.0).contains(&f) {
         return Err(SimpleException::new_msg(
             ExcType::ValueError,
             format!("expected a number in range from -1 up to 1, got {f:?}"),
@@ -773,7 +781,8 @@ fn math_acos(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     defer_drop!(value, heap);
 
     let f = value_to_float(value, "math.acos", heap)?;
-    if !(-1.0..=1.0).contains(&f) {
+    // NaN passes through (acos(nan) = nan), but out-of-range finite values raise
+    if !f.is_nan() && !(-1.0..=1.0).contains(&f) {
         return Err(SimpleException::new_msg(
             ExcType::ValueError,
             format!("expected a number in range from -1 up to 1, got {f:?}"),
@@ -1093,8 +1102,14 @@ fn math_fmod(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let x = value_to_float(x_val, "math.fmod", heap)?;
     let y = value_to_float(y_val, "math.fmod", heap)?;
 
-    if y == 0.0 {
-        return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
+    if y == 0.0 || x.is_infinite() {
+        // CPython raises for both fmod(x, 0) and fmod(inf, y)
+        // but NaN inputs propagate
+        if !x.is_nan() && !y.is_nan() {
+            return Err(
+                SimpleException::new_msg(ExcType::ValueError, "math domain error").into(),
+            );
+        }
     }
     Ok(Value::Float(x % y))
 }
@@ -1110,6 +1125,10 @@ fn math_remainder(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> Run
     let x = value_to_float(x_val, "math.remainder", heap)?;
     let y = value_to_float(y_val, "math.remainder", heap)?;
 
+    // NaN propagates
+    if x.is_nan() || y.is_nan() {
+        return Ok(Value::Float(f64::NAN));
+    }
     if y == 0.0 {
         return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
     }
@@ -1134,6 +1153,19 @@ fn math_modf(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     defer_drop!(value, heap);
 
     let f = value_to_float(value, "math.modf", heap)?;
+
+    // Special cases: modf(inf) = (0.0, inf), modf(nan) = (nan, nan)
+    if f.is_nan() {
+        let tuple = allocate_tuple(smallvec![Value::Float(f64::NAN), Value::Float(f64::NAN)], heap)?;
+        return Ok(tuple);
+    }
+    if f.is_infinite() {
+        // The fractional part is ±0.0 (signed to match the input sign)
+        let frac = if f > 0.0 { 0.0 } else { -0.0_f64 };
+        let tuple = allocate_tuple(smallvec![Value::Float(frac), Value::Float(f)], heap)?;
+        return Ok(tuple);
+    }
+
     let integer = f.trunc();
     let fractional = f - integer;
     let tuple = allocate_tuple(smallvec![Value::Float(fractional), Value::Float(integer)], heap)?;
@@ -1198,23 +1230,21 @@ fn math_ldexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let x = value_to_float(x_val, "math.ldexp", heap)?;
     let i = value_to_int(i_val, "math.ldexp", heap)?;
 
-    // Clamp exponent to avoid overflow in the shift; ldexp saturates to inf/-inf
-    // for very large exponents, matching CPython.
+    // Special cases: inf/nan/zero pass through regardless of exponent
+    if x.is_nan() || x.is_infinite() || x == 0.0 {
+        return Ok(Value::Float(x));
+    }
+
+    // Clamp exponent and check for overflow, matching CPython behavior.
     let result = if i > 1074 {
-        if x > 0.0 {
-            f64::INFINITY
-        } else if x < 0.0 {
-            f64::NEG_INFINITY
-        } else {
-            0.0
-        }
+        // Would overflow to infinity — CPython raises OverflowError
+        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
     } else if i < -1074 {
+        // Underflows to zero
         if x > 0.0 {
             0.0
-        } else if x < 0.0 {
-            -0.0
         } else {
-            0.0
+            -0.0
         }
     } else {
         // Use successive doubling/halving to avoid intermediate overflow
@@ -1233,6 +1263,11 @@ fn math_ldexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
         result
     };
 
+    // If the result overflowed to infinity, CPython raises OverflowError
+    if result.is_infinite() {
+        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
+    }
+
     Ok(Value::Float(result))
 }
 
@@ -1250,6 +1285,14 @@ fn math_gamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     defer_drop!(value, heap);
 
     let f = value_to_float(value, "math.gamma", heap)?;
+    // CPython raises ValueError for -inf
+    if f == f64::NEG_INFINITY {
+        return Err(SimpleException::new_msg(
+            ExcType::ValueError,
+            format!("expected a noninteger or positive integer, got {f:?}"),
+        )
+        .into());
+    }
     // Check for non-positive integers (poles of the gamma function)
     if f <= 0.0 && f == f.floor() && f.is_finite() {
         return Err(SimpleException::new_msg(
