@@ -163,26 +163,12 @@ impl SetStorage {
         }
     }
 
-    /// Copies entries without incrementing reference counts.
-    ///
-    /// Used to break borrow conflicts: copy entries first, then after the
-    /// borrow ends, call `inc_refs_for_entries` to fix up refcounts.
-    fn copy_entries(&self) -> Vec<(Value, u64)> {
+    /// Clones entries with proper reference counting.
+    fn clone_entries(&self, heap: &Heap<impl ResourceTracker>) -> Vec<(Value, u64)> {
         self.entries
             .iter()
-            .map(|e| (e.value.copy_for_extend(), e.hash))
+            .map(|e| (e.value.clone_with_heap(heap), e.hash))
             .collect()
-    }
-
-    /// Increments reference counts for all Ref values in an entries vector.
-    ///
-    /// Call this after `copy_entries` once the original borrow is released.
-    fn inc_refs_for_entries(entries: &[(Value, u64)], heap: &mut Heap<impl ResourceTracker>) {
-        for (v, _) in entries {
-            if let Value::Ref(id) = v {
-                heap.inc_ref(*id);
-            }
-        }
     }
 
     /// Returns the number of elements in the set.
@@ -317,7 +303,7 @@ impl SetStorage {
     }
 
     /// Creates a deep clone with proper reference counting.
-    fn clone_with_heap(&self, heap: &mut Heap<impl ResourceTracker>) -> Self {
+    fn clone_with_heap(&self, heap: &Heap<impl ResourceTracker>) -> Self {
         Self {
             indices: self.indices.clone(),
             entries: self
@@ -866,17 +852,14 @@ impl Set {
         // Try to get entries from a Set/FrozenSet directly
         let entries_opt = match &other {
             Value::Ref(id) => match heap.get(*id) {
-                HeapData::Set(other_set) => Some(other_set.0.copy_entries()),
-                HeapData::FrozenSet(other_set) => Some(other_set.0.copy_entries()),
+                HeapData::Set(other_set) => Some(other_set.0.clone_entries(heap)),
+                HeapData::FrozenSet(other_set) => Some(other_set.0.clone_entries(heap)),
                 _ => None,
             },
             _ => None,
         };
 
         if let Some(entries) = entries_opt {
-            // Borrow released, now we can use heap mutably
-            // IMPORTANT: Inc refs BEFORE dropping the source to avoid use-after-free
-            SetStorage::inc_refs_for_entries(&entries, heap);
             other.drop_with_heap(heap);
             for (value, _hash) in entries {
                 self.add(value, heap, interns)?;
@@ -962,16 +945,15 @@ impl Set {
         // Try to get entries from a Set/FrozenSet directly
         let entries_opt = match other {
             Value::Ref(id) => match heap.get(*id) {
-                HeapData::Set(other_set) => Some(other_set.0.copy_entries()),
-                HeapData::FrozenSet(other_set) => Some(other_set.0.copy_entries()),
+                HeapData::Set(other_set) => Some(other_set.0.clone_entries(heap)),
+                HeapData::FrozenSet(other_set) => Some(other_set.0.clone_entries(heap)),
                 _ => None,
             },
             _ => None,
         };
 
         if let Some(entries) = entries_opt {
-            // Borrow released, build temporary storage and check
-            SetStorage::inc_refs_for_entries(&entries, heap);
+            // Build temporary storage and check
             let other_storage = SetStorage::from_entries(entries);
             let result = self.0.is_subset(&other_storage, heap, interns);
             other_storage.drop_all_values(heap);
@@ -995,16 +977,15 @@ impl Set {
         // Try to get entries from a Set/FrozenSet directly
         let entries_opt = match other {
             Value::Ref(id) => match heap.get(*id) {
-                HeapData::Set(other_set) => Some(other_set.0.copy_entries()),
-                HeapData::FrozenSet(other_set) => Some(other_set.0.copy_entries()),
+                HeapData::Set(other_set) => Some(other_set.0.clone_entries(heap)),
+                HeapData::FrozenSet(other_set) => Some(other_set.0.clone_entries(heap)),
                 _ => None,
             },
             _ => None,
         };
 
         if let Some(entries) = entries_opt {
-            // Borrow released, build temporary storage and check
-            SetStorage::inc_refs_for_entries(&entries, heap);
+            // Build temporary storage and check
             let other_storage = SetStorage::from_entries(entries);
             let result = self.0.is_superset(&other_storage, heap, interns);
             other_storage.drop_all_values(heap);
@@ -1028,16 +1009,15 @@ impl Set {
         // Try to get entries from a Set/FrozenSet directly
         let entries_opt = match other {
             Value::Ref(id) => match heap.get(*id) {
-                HeapData::Set(other_set) => Some(other_set.0.copy_entries()),
-                HeapData::FrozenSet(other_set) => Some(other_set.0.copy_entries()),
+                HeapData::Set(other_set) => Some(other_set.0.clone_entries(heap)),
+                HeapData::FrozenSet(other_set) => Some(other_set.0.clone_entries(heap)),
                 _ => None,
             },
             _ => None,
         };
 
         if let Some(entries) = entries_opt {
-            // Borrow released, build temporary storage and check
-            SetStorage::inc_refs_for_entries(&entries, heap);
+            // Build temporary storage and check
             let other_storage = SetStorage::from_entries(entries);
             let result = self.0.is_disjoint(&other_storage, heap, interns);
             other_storage.drop_all_values(heap);
@@ -1060,17 +1040,14 @@ impl Set {
         // Try to get entries from a Set/FrozenSet directly
         let entries_opt = match &value {
             Value::Ref(id) => match heap.get(*id) {
-                HeapData::Set(set) => Some(set.0.copy_entries()),
-                HeapData::FrozenSet(set) => Some(set.0.copy_entries()),
+                HeapData::Set(set) => Some(set.0.clone_entries(heap)),
+                HeapData::FrozenSet(set) => Some(set.0.clone_entries(heap)),
                 _ => None,
             },
             _ => None,
         };
 
         if let Some(entries) = entries_opt {
-            // Borrow released, build storage with proper refcounts
-            // IMPORTANT: Inc refs BEFORE dropping the source to avoid use-after-free
-            SetStorage::inc_refs_for_entries(&entries, heap);
             value.drop_with_heap(heap);
             return Ok(SetStorage::from_entries(entries));
         }
@@ -1352,16 +1329,15 @@ impl FrozenSet {
         // Try to get entries from a Set/FrozenSet directly
         let entries_opt = match other {
             Value::Ref(id) => match heap.get(*id) {
-                HeapData::Set(other_set) => Some(other_set.0.copy_entries()),
-                HeapData::FrozenSet(other_set) => Some(other_set.0.copy_entries()),
+                HeapData::Set(other_set) => Some(other_set.0.clone_entries(heap)),
+                HeapData::FrozenSet(other_set) => Some(other_set.0.clone_entries(heap)),
                 _ => None,
             },
             _ => None,
         };
 
         if let Some(entries) = entries_opt {
-            // Borrow released, build temporary storage and check
-            SetStorage::inc_refs_for_entries(&entries, heap);
+            // Build temporary storage and check
             let other_storage = SetStorage::from_entries(entries);
             let result = self.0.is_subset(&other_storage, heap, interns);
             other_storage.drop_all_values(heap);
@@ -1385,16 +1361,15 @@ impl FrozenSet {
         // Try to get entries from a Set/FrozenSet directly
         let entries_opt = match other {
             Value::Ref(id) => match heap.get(*id) {
-                HeapData::Set(other_set) => Some(other_set.0.copy_entries()),
-                HeapData::FrozenSet(other_set) => Some(other_set.0.copy_entries()),
+                HeapData::Set(other_set) => Some(other_set.0.clone_entries(heap)),
+                HeapData::FrozenSet(other_set) => Some(other_set.0.clone_entries(heap)),
                 _ => None,
             },
             _ => None,
         };
 
         if let Some(entries) = entries_opt {
-            // Borrow released, build temporary storage and check
-            SetStorage::inc_refs_for_entries(&entries, heap);
+            // Build temporary storage and check
             let other_storage = SetStorage::from_entries(entries);
             let result = self.0.is_superset(&other_storage, heap, interns);
             other_storage.drop_all_values(heap);
@@ -1418,16 +1393,15 @@ impl FrozenSet {
         // Try to get entries from a Set/FrozenSet directly
         let entries_opt = match other {
             Value::Ref(id) => match heap.get(*id) {
-                HeapData::Set(other_set) => Some(other_set.0.copy_entries()),
-                HeapData::FrozenSet(other_set) => Some(other_set.0.copy_entries()),
+                HeapData::Set(other_set) => Some(other_set.0.clone_entries(heap)),
+                HeapData::FrozenSet(other_set) => Some(other_set.0.clone_entries(heap)),
                 _ => None,
             },
             _ => None,
         };
 
         if let Some(entries) = entries_opt {
-            // Borrow released, build temporary storage and check
-            SetStorage::inc_refs_for_entries(&entries, heap);
+            // Build temporary storage and check
             let other_storage = SetStorage::from_entries(entries);
             let result = self.0.is_disjoint(&other_storage, heap, interns);
             other_storage.drop_all_values(heap);
