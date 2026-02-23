@@ -466,3 +466,330 @@ try:
 except TypeError:
     threw = True
 assert threw, 'radians(str) raises TypeError'
+
+# === math.sin() ===
+assert math.sin(0) == 0.0, 'sin(0)'
+assert math.sin(math.pi / 2) == 1.0, 'sin(pi/2)'
+assert math.sin(math.pi) < 1e-15, 'sin(pi) near zero'
+assert math.isnan(math.sin(float('nan'))), 'sin(nan) is nan'
+
+threw = False
+try:
+    math.sin(float('inf'))
+except ValueError:
+    threw = True
+assert threw, 'sin(inf) raises ValueError'
+
+# === math.cos() ===
+assert math.cos(0) == 1.0, 'cos(0)'
+assert abs(math.cos(math.pi / 2)) < 1e-15, 'cos(pi/2) near zero'
+assert math.cos(math.pi) == -1.0, 'cos(pi)'
+assert math.isnan(math.cos(float('nan'))), 'cos(nan) is nan'
+
+threw = False
+try:
+    math.cos(float('inf'))
+except ValueError:
+    threw = True
+assert threw, 'cos(inf) raises ValueError'
+
+# === math.tan() ===
+assert math.tan(0) == 0.0, 'tan(0)'
+assert abs(math.tan(math.pi / 4) - 1.0) < 1e-15, 'tan(pi/4) near 1'
+assert math.isnan(math.tan(float('nan'))), 'tan(nan) is nan'
+
+threw = False
+try:
+    math.tan(float('inf'))
+except ValueError:
+    threw = True
+assert threw, 'tan(inf) raises ValueError'
+
+# === math.asin() ===
+assert math.asin(0) == 0.0, 'asin(0)'
+assert math.asin(1) == math.pi / 2, 'asin(1)'
+assert math.asin(-1) == -math.pi / 2, 'asin(-1)'
+
+threw = False
+try:
+    math.asin(2)
+except ValueError:
+    threw = True
+assert threw, 'asin(2) raises ValueError'
+
+threw = False
+try:
+    math.asin(-2)
+except ValueError:
+    threw = True
+assert threw, 'asin(-2) raises ValueError'
+
+# === math.acos() ===
+assert math.acos(1) == 0.0, 'acos(1)'
+assert math.acos(0) == math.pi / 2, 'acos(0)'
+assert math.acos(-1) == math.pi, 'acos(-1)'
+
+threw = False
+try:
+    math.acos(2)
+except ValueError:
+    threw = True
+assert threw, 'acos(2) raises ValueError'
+
+# === math.atan() ===
+assert math.atan(0) == 0.0, 'atan(0)'
+assert math.atan(1) == math.pi / 4, 'atan(1)'
+assert math.atan(float('inf')) == math.pi / 2, 'atan(inf)'
+assert math.atan(float('-inf')) == -math.pi / 2, 'atan(-inf)'
+
+# === math.atan2() ===
+assert math.atan2(0, 1) == 0.0, 'atan2(0, 1)'
+assert math.atan2(1, 0) == math.pi / 2, 'atan2(1, 0)'
+assert math.atan2(0, -1) == math.pi, 'atan2(0, -1)'
+assert math.atan2(0, 0) == 0.0, 'atan2(0, 0)'
+
+# === math.sinh() ===
+assert math.sinh(0) == 0.0, 'sinh(0)'
+assert math.isclose(math.sinh(1), 1.1752011936438014), 'sinh(1)'
+assert math.sinh(float('inf')) == float('inf'), 'sinh(inf)'
+
+threw = False
+try:
+    math.sinh(1000)
+except OverflowError:
+    threw = True
+assert threw, 'sinh(1000) raises OverflowError'
+
+# === math.cosh() ===
+assert math.cosh(0) == 1.0, 'cosh(0)'
+assert math.isclose(math.cosh(1), 1.5430806348152437), 'cosh(1)'
+assert math.cosh(float('inf')) == float('inf'), 'cosh(inf)'
+
+# === math.tanh() ===
+assert math.tanh(0) == 0.0, 'tanh(0)'
+assert math.tanh(float('inf')) == 1.0, 'tanh(inf)'
+assert math.tanh(float('-inf')) == -1.0, 'tanh(-inf)'
+assert abs(math.tanh(1) - 0.7615941559557649) < 1e-10, 'tanh(1)'
+
+# === math.asinh() ===
+assert math.asinh(0) == 0.0, 'asinh(0)'
+assert math.isclose(math.asinh(1), 0.881373587019543), 'asinh(1)'
+
+# === math.acosh() ===
+assert math.acosh(1) == 0.0, 'acosh(1)'
+assert math.isclose(math.acosh(2), 1.3169578969248166), 'acosh(2)'
+
+threw = False
+try:
+    math.acosh(0.5)
+except ValueError:
+    threw = True
+assert threw, 'acosh(0.5) raises ValueError'
+
+# === math.atanh() ===
+assert math.atanh(0) == 0.0, 'atanh(0)'
+assert math.isclose(math.atanh(0.5), 0.5493061443340549), 'atanh(0.5)'
+
+threw = False
+try:
+    math.atanh(1)
+except ValueError:
+    threw = True
+assert threw, 'atanh(1) raises ValueError'
+
+threw = False
+try:
+    math.atanh(-1)
+except ValueError:
+    threw = True
+assert threw, 'atanh(-1) raises ValueError'
+
+# === math.exp() ===
+assert math.exp(0) == 1.0, 'exp(0)'
+assert math.exp(1) == math.e, 'exp(1)'
+assert math.exp(float('-inf')) == 0.0, 'exp(-inf)'
+assert math.exp(float('inf')) == float('inf'), 'exp(inf)'
+
+threw = False
+try:
+    math.exp(1000)
+except OverflowError:
+    threw = True
+assert threw, 'exp(1000) raises OverflowError'
+
+# === math.exp2() ===
+assert math.exp2(0) == 1.0, 'exp2(0)'
+assert math.exp2(3) == 8.0, 'exp2(3)'
+assert math.exp2(10) == 1024.0, 'exp2(10)'
+
+# === math.expm1() ===
+assert math.expm1(0) == 0.0, 'expm1(0)'
+assert math.isclose(math.expm1(1), math.e - 1), 'expm1(1)'
+# expm1 is more precise than exp(x)-1 for small x
+assert math.expm1(1e-15) != 0.0, 'expm1(1e-15) is precise'
+
+# === math.log1p() ===
+assert math.log1p(0) == 0.0, 'log1p(0)'
+assert math.isclose(math.log1p(math.e - 1), 1.0), 'log1p(e-1)'
+
+threw = False
+try:
+    math.log1p(-1)
+except ValueError:
+    threw = True
+assert threw, 'log1p(-1) raises ValueError'
+
+threw = False
+try:
+    math.log1p(-2)
+except ValueError:
+    threw = True
+assert threw, 'log1p(-2) raises ValueError'
+
+# === math.pow() ===
+assert math.pow(2, 3) == 8.0, 'pow(2, 3)'
+assert math.pow(2.0, 0.5) == math.sqrt(2), 'pow(2, 0.5)'
+assert math.pow(0, 0) == 1.0, 'pow(0, 0)'
+assert isinstance(math.pow(2, 3), float), 'pow returns float'
+
+# === math.isqrt() ===
+assert math.isqrt(0) == 0, 'isqrt(0)'
+assert math.isqrt(1) == 1, 'isqrt(1)'
+assert math.isqrt(4) == 2, 'isqrt(4)'
+assert math.isqrt(10) == 3, 'isqrt(10)'
+assert math.isqrt(99) == 9, 'isqrt(99)'
+assert math.isqrt(100) == 10, 'isqrt(100)'
+
+threw = False
+try:
+    math.isqrt(-1)
+except ValueError:
+    threw = True
+assert threw, 'isqrt(-1) raises ValueError'
+
+# === math.cbrt() ===
+assert math.cbrt(0) == 0.0, 'cbrt(0)'
+assert math.cbrt(-8) == -2.0, 'cbrt(-8)'
+assert math.cbrt(1) == 1.0, 'cbrt(1)'
+
+# === math.fmod() ===
+assert math.fmod(10, 3) == 1.0, 'fmod(10, 3)'
+assert math.fmod(-10, 3) == -1.0, 'fmod(-10, 3)'
+assert math.fmod(10.5, 3) == 1.5, 'fmod(10.5, 3)'
+
+threw = False
+try:
+    math.fmod(10, 0)
+except ValueError:
+    threw = True
+assert threw, 'fmod(10, 0) raises ValueError'
+
+# === math.remainder() ===
+assert math.remainder(10, 3) == 1.0, 'remainder(10, 3)'
+assert math.remainder(10, 4) == 2.0, 'remainder(10, 4)'
+
+threw = False
+try:
+    math.remainder(10, 0)
+except ValueError:
+    threw = True
+assert threw, 'remainder(10, 0) raises ValueError'
+
+# === math.modf() ===
+r = math.modf(3.5)
+assert r == (0.5, 3.0), 'modf(3.5)'
+r = math.modf(-3.5)
+assert r == (-0.5, -3.0), 'modf(-3.5)'
+r = math.modf(0.0)
+assert r == (0.0, 0.0), 'modf(0.0)'
+
+# === math.frexp() ===
+r = math.frexp(0.0)
+assert r == (0.0, 0), 'frexp(0.0)'
+r = math.frexp(3.5)
+assert r == (0.875, 2), 'frexp(3.5)'
+
+# === math.ldexp() ===
+assert math.ldexp(0.875, 2) == 3.5, 'ldexp(0.875, 2)'
+assert math.ldexp(1.0, 0) == 1.0, 'ldexp(1.0, 0)'
+assert math.ldexp(0.5, 1) == 1.0, 'ldexp(0.5, 1)'
+
+# === math.comb() ===
+assert math.comb(5, 2) == 10, 'comb(5, 2)'
+assert math.comb(10, 0) == 1, 'comb(10, 0)'
+assert math.comb(10, 10) == 1, 'comb(10, 10)'
+assert math.comb(0, 0) == 1, 'comb(0, 0)'
+assert math.comb(5, 6) == 0, 'comb(5, 6) k > n'
+
+threw = False
+try:
+    math.comb(5, -1)
+except ValueError:
+    threw = True
+assert threw, 'comb(5, -1) raises ValueError'
+
+# === math.perm() ===
+assert math.perm(5, 2) == 20, 'perm(5, 2)'
+assert math.perm(5, 0) == 1, 'perm(5, 0)'
+assert math.perm(5, 5) == 120, 'perm(5, 5)'
+assert math.perm(5, 6) == 0, 'perm(5, 6) k > n'
+
+threw = False
+try:
+    math.perm(5, -1)
+except ValueError:
+    threw = True
+assert threw, 'perm(5, -1) raises ValueError'
+
+# === math.gamma() ===
+assert math.gamma(1) == 1.0, 'gamma(1)'
+assert math.gamma(5) == 24.0, 'gamma(5)'
+assert math.isclose(math.gamma(0.5), math.sqrt(math.pi)), 'gamma(0.5)'
+
+threw = False
+try:
+    math.gamma(0)
+except ValueError:
+    threw = True
+assert threw, 'gamma(0) raises ValueError'
+
+threw = False
+try:
+    math.gamma(-1)
+except ValueError:
+    threw = True
+assert threw, 'gamma(-1) raises ValueError'
+
+# === math.lgamma() ===
+assert math.lgamma(1) == 0.0, 'lgamma(1)'
+assert math.isclose(math.lgamma(5), math.log(24)), 'lgamma(5)'
+
+threw = False
+try:
+    math.lgamma(0)
+except ValueError:
+    threw = True
+assert threw, 'lgamma(0) raises ValueError'
+
+# === math.erf() ===
+assert math.erf(0) == 0.0, 'erf(0)'
+assert abs(math.erf(1) - 0.8427007929497149) < 1e-6, 'erf(1)'
+assert math.erf(float('inf')) == 1.0, 'erf(inf)'
+assert math.erf(float('-inf')) == -1.0, 'erf(-inf)'
+
+# === math.erfc() ===
+assert math.erfc(0) == 1.0, 'erfc(0)'
+assert math.isclose(math.erfc(1), 1.0 - math.erf(1)), 'erfc(1)'
+
+# === math.nextafter() ===
+r = math.nextafter(1.0, 2.0)
+assert r > 1.0, 'nextafter(1.0, 2.0) > 1.0'
+assert r == 1.0000000000000002, 'nextafter(1.0, 2.0) value'
+r = math.nextafter(1.0, 0.0)
+assert r < 1.0, 'nextafter(1.0, 0.0) < 1.0'
+
+# === math.ulp() ===
+assert math.ulp(1.0) == 2.220446049250313e-16, 'ulp(1.0)'
+assert math.ulp(0.0) > 0, 'ulp(0.0) > 0'
+assert math.isinf(math.ulp(float('inf'))), 'ulp(inf) is inf'
+assert math.isnan(math.ulp(float('nan'))), 'ulp(nan) is nan'

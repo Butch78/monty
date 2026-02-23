@@ -353,24 +353,68 @@ pub enum StaticStrings {
     // ==========================
     // math module strings
     Math,
+    // Rounding
     Floor,
     Ceil,
     Trunc,
+    // Roots & powers
     Sqrt,
+    Isqrt,
+    Cbrt,
+    Pow,
+    Exp,
+    Exp2,
+    Expm1,
+    // Logarithms
+    Log,
+    Log1p,
+    Log2,
+    Log10,
+    // Float properties
     Fabs,
     Isnan,
     Isinf,
     Isfinite,
-    Log,
-    Log2,
-    Log10,
+    Copysign,
+    Isclose,
+    Nextafter,
+    Ulp,
+    // Trigonometric
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+    Atan2,
+    // Hyperbolic
+    Sinh,
+    Cosh,
+    Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
+    // Angular conversion
+    Degrees,
+    Radians,
+    // Integer math
     Factorial,
     Gcd,
     Lcm,
-    Copysign,
-    Isclose,
-    Degrees,
-    Radians,
+    Comb,
+    Perm,
+    // Modular / decomposition
+    Fmod,
+    Remainder,
+    Modf,
+    Frexp,
+    Ldexp,
+    // Special functions
+    Gamma,
+    Lgamma,
+    Erf,
+    Erfc,
+    // Constants
     /// `math.pi` constant
     Pi,
     /// `math.e` constant
