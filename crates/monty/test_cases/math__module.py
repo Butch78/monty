@@ -1235,3 +1235,42 @@ try:
 except TypeError:
     threw = True
 assert threw, 'ulp(str) raises TypeError'
+
+# === Additional edge cases for coverage ===
+
+# --- frexp subnormal numbers ---
+r = math.frexp(5e-324)
+assert r == (0.5, -1073), 'frexp(5e-324) subnormal'
+
+# --- ldexp large negative exponent (underflow to zero) ---
+assert math.ldexp(1.0, -2000) == 0.0, 'ldexp(1.0, -2000) underflows to 0'
+
+# --- fmod NaN propagation edge cases ---
+assert math.isnan(math.fmod(float('inf'), float('nan'))), 'fmod(inf, nan) propagates nan'
+assert math.isnan(math.fmod(float('nan'), 0)), 'fmod(nan, 0) propagates nan'
+
+# --- gamma negative non-integer (reflection formula) ---
+assert math.isclose(math.gamma(-0.5), -3.544907701811032), 'gamma(-0.5)'
+assert math.isclose(math.gamma(-1.5), 2.3632718012073544), 'gamma(-1.5)'
+
+# --- gamma(-inf) raises ValueError ---
+threw = False
+try:
+    math.gamma(float('-inf'))
+except ValueError:
+    threw = True
+assert threw, 'gamma(-inf) raises ValueError'
+
+# --- lgamma(-inf) returns inf ---
+assert math.lgamma(float('-inf')) == float('inf'), 'lgamma(-inf) returns inf'
+
+# --- lgamma overflow for extremely large input ---
+threw = False
+try:
+    math.lgamma(1e308)
+except OverflowError:
+    threw = True
+assert threw, 'lgamma(1e308) raises OverflowError'
+
+# --- lgamma negative non-integer (reflection formula) ---
+assert math.isclose(math.lgamma(-0.5), 1.265512123484645), 'lgamma(-0.5) reflection'
