@@ -379,13 +379,21 @@ fn math_isqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
         reason = "initial estimate doesn't need to be exact, Newton's method refines it"
     )]
     let mut x = (n as f64).sqrt() as i64;
-    // Refine: divide-and-average avoids overflow from (x + n/x)
+    // Refine: divide-and-average avoids overflow from (x + n/x).
+    // The halving step `(x - q) / 2` uses integer division, which truncates.
+    // When x - q == 1, the step becomes 0 and x never changes — so we detect
+    // that case and break directly.
     loop {
         let q = n / x;
         if q >= x {
             break;
         }
-        x = x - (x - q) / 2;
+        let delta = (x - q) / 2;
+        if delta == 0 {
+            // x overshoots by exactly 1; the overshoot-correction loop below will fix it
+            break;
+        }
+        x -= delta;
         if x <= q {
             x = q;
             break;
@@ -1460,11 +1468,10 @@ fn nextafter_impl(x: f64, y: f64) -> f64 {
     reason = "mathematical function needs exact comparisons and integer factorial computation"
 )]
 fn gamma_impl(x: f64) -> f64 {
+    // Note: NEG_INFINITY and non-positive integers are handled by `math_gamma` before
+    // calling this function, so we don't need to check for them here.
     if x.is_nan() || x == f64::INFINITY {
         return x;
-    }
-    if x == f64::NEG_INFINITY {
-        return f64::NAN;
     }
     // For positive integers, return exact factorial
     if x > 0.0 && x == x.floor() && x <= 21.0 {
@@ -1478,9 +1485,6 @@ fn gamma_impl(x: f64) -> f64 {
     if x < 0.5 {
         // Reflection formula: Γ(x) = π / (sin(πx) · Γ(1-x))
         let sin_px = (std::f64::consts::PI * x).sin();
-        if sin_px == 0.0 {
-            return f64::INFINITY; // poles at non-positive integers
-        }
         return std::f64::consts::PI / (sin_px * gamma_impl(1.0 - x));
     }
     lanczos_gamma(x)
@@ -1541,10 +1545,9 @@ fn lgamma_impl(x: f64) -> f64 {
     }
     if x < 0.5 {
         // Reflection: ln|Γ(x)| = ln(π) - ln|sin(πx)| - ln|Γ(1-x)|
+        // Note: non-positive integers (where sin(πx) == 0) are handled by `math_lgamma`
+        // before calling this function.
         let sin_px = (std::f64::consts::PI * x).sin().abs();
-        if sin_px == 0.0 {
-            return f64::INFINITY;
-        }
         return std::f64::consts::PI.ln() - sin_px.ln() - lgamma_impl(1.0 - x);
     }
     lanczos_lgamma(x)
