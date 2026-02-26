@@ -349,6 +349,41 @@ pub enum StaticStrings {
     Start,
     Stop,
     Step,
+
+    // ==========================
+    // math module strings
+    Math,
+    Floor,
+    Ceil,
+    Trunc,
+    Sqrt,
+    Fabs,
+    Isnan,
+    Isinf,
+    Isfinite,
+    Log,
+    Log2,
+    Log10,
+    Factorial,
+    Gcd,
+    Lcm,
+    Copysign,
+    Isclose,
+    Degrees,
+    Radians,
+    /// `math.pi` constant
+    Pi,
+    /// `math.e` constant
+    #[strum(serialize = "e")]
+    MathE,
+    /// `math.tau` constant
+    Tau,
+    /// `math.inf` constant
+    #[strum(serialize = "inf")]
+    MathInf,
+    /// `math.nan` constant
+    #[strum(serialize = "nan")]
+    MathNan,
 }
 
 impl StaticStrings {

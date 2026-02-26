@@ -291,13 +291,10 @@ impl PyTrait for Value {
                     Ok(None)
                 }
             }
-            // Ref vs Ref comparison: handles LongInt and Str
+            // Ref vs Ref comparison: dispatches to HeapData::py_cmp which handles
+            // LongInt, Str, Bytes, Tuple, List, and NamedTuple ordering
             (Self::Ref(id1), Self::Ref(id2)) => {
-                Ok(heap.with_two(*id1, *id2, |_heap, left, right| match (left, right) {
-                    (HeapData::LongInt(a), HeapData::LongInt(b)) => a.inner().partial_cmp(b.inner()),
-                    (HeapData::Str(a), HeapData::Str(b)) => a.as_str().partial_cmp(b.as_str()),
-                    _ => None,
-                }))
+                heap.with_two(*id1, *id2, |heap, left, right| left.py_cmp(right, heap, guard, interns))
             }
             // Interned string comparisons
             (Self::InternString(s1), Self::InternString(s2)) => {
@@ -434,6 +431,9 @@ impl PyTrait for Value {
         interns: &Interns,
     ) -> Result<Option<Value>, crate::resource::ResourceError> {
         match (self, other) {
+            // Bool promotion: convert to Int and re-dispatch
+            (Self::Bool(b), _) => Self::Int(i64::from(*b)).py_add(other, heap, interns),
+            (_, Self::Bool(b)) => self.py_add(&Self::Int(i64::from(*b)), heap, interns),
             // Int + Int with overflow detection
             (Self::Int(a), Self::Int(b)) => {
                 if let Some(result) = a.checked_add(*b) {
@@ -545,6 +545,9 @@ impl PyTrait for Value {
         heap: &mut Heap<impl ResourceTracker>,
     ) -> Result<Option<Self>, crate::resource::ResourceError> {
         match (self, other) {
+            // Bool promotion: convert to Int and re-dispatch
+            (Self::Bool(b), _) => Self::Int(i64::from(*b)).py_sub(other, heap),
+            (_, Self::Bool(b)) => self.py_sub(&Self::Int(i64::from(*b)), heap),
             // Int - Int with overflow detection
             (Self::Int(a), Self::Int(b)) => {
                 if let Some(result) = a.checked_sub(*b) {
@@ -601,6 +604,9 @@ impl PyTrait for Value {
 
     fn py_mod(&self, other: &Self, heap: &mut Heap<impl ResourceTracker>) -> RunResult<Option<Self>> {
         match (self, other) {
+            // Bool promotion: convert to Int and re-dispatch
+            (Self::Bool(b), _) => Self::Int(i64::from(*b)).py_mod(other, heap),
+            (_, Self::Bool(b)) => self.py_mod(&Self::Int(i64::from(*b)), heap),
             (Self::Int(a), Self::Int(b)) => {
                 if *b == 0 {
                     Err(ExcType::zero_division().into())
@@ -710,10 +716,19 @@ impl PyTrait for Value {
         &mut self,
         other: Self,
         heap: &mut Heap<impl ResourceTracker>,
-        _self_id: Option<HeapId>,
+        self_id: Option<HeapId>,
         interns: &Interns,
     ) -> Result<bool, crate::resource::ResourceError> {
         match (&self, &other) {
+            // Bool promotion: convert Bool to Int and re-dispatch
+            (Self::Bool(_), _) => {
+                *self = Self::Int(i64::from(matches!(self, Self::Bool(true))));
+                self.py_iadd(other, heap, self_id, interns)
+            }
+            (_, Self::Bool(b)) => {
+                let other_int = Self::Int(i64::from(*b));
+                self.py_iadd(other_int, heap, self_id, interns)
+            }
             (Self::Int(v1), Self::Int(v2)) => {
                 if let Some(result) = v1.checked_add(*v2) {
                     *self = Self::Int(result);
@@ -804,6 +819,9 @@ impl PyTrait for Value {
         interns: &Interns,
     ) -> RunResult<Option<Value>> {
         match (self, other) {
+            // Bool promotion: convert to Int and re-dispatch
+            (Self::Bool(b), _) => Self::Int(i64::from(*b)).py_mult(other, heap, interns),
+            (_, Self::Bool(b)) => self.py_mult(&Self::Int(i64::from(*b)), heap, interns),
             // Numeric multiplication with overflow promotion to LongInt
             (Self::Int(a), Self::Int(b)) => {
                 if let Some(result) = a.checked_mul(*b) {
@@ -823,28 +841,6 @@ impl PyTrait for Value {
             (Self::Float(a), Self::Float(b)) => Ok(Some(Self::Float(a * b))),
             (Self::Int(a), Self::Float(b)) => Ok(Some(Self::Float(*a as f64 * b))),
             (Self::Float(a), Self::Int(b)) => Ok(Some(Self::Float(a * *b as f64))),
-
-            // Bool numeric multiplication (True=1, False=0)
-            (Self::Bool(a), Self::Int(b)) => {
-                let a_int = i64::from(*a);
-                Ok(Some(Self::Int(a_int * b)))
-            }
-            (Self::Int(a), Self::Bool(b)) => {
-                let b_int = i64::from(*b);
-                Ok(Some(Self::Int(a * b_int)))
-            }
-            (Self::Bool(a), Self::Float(b)) => {
-                let a_float = if *a { 1.0 } else { 0.0 };
-                Ok(Some(Self::Float(a_float * b)))
-            }
-            (Self::Float(a), Self::Bool(b)) => {
-                let b_float = if *b { 1.0 } else { 0.0 };
-                Ok(Some(Self::Float(a * b_float)))
-            }
-            (Self::Bool(a), Self::Bool(b)) => {
-                let result = i64::from(*a) * i64::from(*b);
-                Ok(Some(Self::Int(result)))
-            }
 
             // String repetition: "ab" * 3 or 3 * "ab"
             (Self::InternString(s), Self::Int(n)) | (Self::Int(n), Self::InternString(s)) => {
@@ -1060,6 +1056,9 @@ impl PyTrait for Value {
 
     fn py_floordiv(&self, other: &Self, heap: &mut Heap<impl ResourceTracker>) -> RunResult<Option<Value>> {
         match (self, other) {
+            // Bool promotion: convert to Int and re-dispatch
+            (Self::Bool(b), _) => Self::Int(i64::from(*b)).py_floordiv(other, heap),
+            (_, Self::Bool(b)) => self.py_floordiv(&Self::Int(i64::from(*b)), heap),
             // Floor division: int // int returns int
             (Self::Int(a), Self::Int(b)) => {
                 if *b == 0 {
@@ -1142,53 +1141,15 @@ impl PyTrait for Value {
                     Ok(Some(Self::Float((a / *b as f64).floor())))
                 }
             }
-            // Bool floor division (True=1, False=0)
-            (Self::Bool(a), Self::Int(b)) => {
-                if *b == 0 {
-                    Err(ExcType::zero_division().into())
-                } else {
-                    let a_int = i64::from(*a);
-                    // Use same floor division logic as Int // Int
-                    let d = a_int / b;
-                    let r = a_int % b;
-                    let result = if r != 0 && (a_int < 0) != (*b < 0) { d - 1 } else { d };
-                    Ok(Some(Self::Int(result)))
-                }
-            }
-            (Self::Int(a), Self::Bool(b)) => {
-                if *b {
-                    Ok(Some(Self::Int(*a))) // a // 1 = a
-                } else {
-                    Err(ExcType::zero_division().into())
-                }
-            }
-            (Self::Bool(a), Self::Float(b)) => {
-                if *b == 0.0 {
-                    Err(ExcType::zero_division().into())
-                } else {
-                    Ok(Some(Self::Float((f64::from(*a) / b).floor())))
-                }
-            }
-            (Self::Float(a), Self::Bool(b)) => {
-                if *b {
-                    Ok(Some(Self::Float(a.floor()))) // a // 1.0 = floor(a)
-                } else {
-                    Err(ExcType::zero_division().into())
-                }
-            }
-            (Self::Bool(a), Self::Bool(b)) => {
-                if *b {
-                    Ok(Some(Self::Int(i64::from(*a)))) // a // 1 = a
-                } else {
-                    Err(ExcType::zero_division().into())
-                }
-            }
             _ => Ok(None),
         }
     }
 
     fn py_pow(&self, other: &Self, heap: &mut Heap<impl ResourceTracker>) -> RunResult<Option<Value>> {
         match (self, other) {
+            // Bool promotion: convert to Int and re-dispatch
+            (Self::Bool(b), _) => Self::Int(i64::from(*b)).py_pow(other, heap),
+            (_, Self::Bool(b)) => self.py_pow(&Self::Int(i64::from(*b)), heap),
             (Self::Int(base), Self::Int(exp)) => {
                 if *base == 0 && *exp < 0 {
                     Err(ExcType::zero_negative_power())
@@ -1331,64 +1292,6 @@ impl PyTrait for Value {
                 } else {
                     // Fall back to powf for exponents outside i32 range
                     Ok(Some(Self::Float(base.powf(*exp as f64))))
-                }
-            }
-            // Bool power operations (True=1, False=0)
-            (Self::Bool(base), Self::Int(exp)) => {
-                let base_int = i64::from(*base);
-                if base_int == 0 && *exp < 0 {
-                    Err(ExcType::zero_negative_power())
-                } else if *exp >= 0 {
-                    // Positive exponent: 1**n=1, 0**n=0 (for n>0), 0**0=1
-                    if let Ok(exp_u32) = u32::try_from(*exp) {
-                        match base_int.checked_pow(exp_u32) {
-                            Some(result) => Ok(Some(Self::Int(result))),
-                            None => Ok(Some(Self::Float((base_int as f64).powf(*exp as f64)))),
-                        }
-                    } else {
-                        Ok(Some(Self::Float((base_int as f64).powf(*exp as f64))))
-                    }
-                } else {
-                    // Negative exponent: return float (1**-n=1.0)
-                    if let Ok(exp_i32) = i32::try_from(*exp) {
-                        Ok(Some(Self::Float((base_int as f64).powi(exp_i32))))
-                    } else {
-                        Ok(Some(Self::Float((base_int as f64).powf(*exp as f64))))
-                    }
-                }
-            }
-            (Self::Int(base), Self::Bool(exp)) => {
-                // n ** True = n, n ** False = 1
-                if *exp {
-                    Ok(Some(Self::Int(*base)))
-                } else {
-                    Ok(Some(Self::Int(1)))
-                }
-            }
-            (Self::Bool(base), Self::Float(exp)) => {
-                let base_float = f64::from(*base);
-                if base_float == 0.0 && *exp < 0.0 {
-                    Err(ExcType::zero_negative_power())
-                } else {
-                    Ok(Some(Self::Float(base_float.powf(*exp))))
-                }
-            }
-            (Self::Float(base), Self::Bool(exp)) => {
-                // base ** True = base, base ** False = 1.0
-                if *exp {
-                    Ok(Some(Self::Float(*base)))
-                } else {
-                    Ok(Some(Self::Float(1.0)))
-                }
-            }
-            (Self::Bool(base), Self::Bool(exp)) => {
-                // True ** True = 1, True ** False = 1, False ** True = 0, False ** False = 1
-                let base_int = i64::from(*base);
-                let exp_int = i64::from(*exp);
-                if exp_int == 0 {
-                    Ok(Some(Self::Int(1))) // anything ** 0 = 1
-                } else {
-                    Ok(Some(Self::Int(base_int))) // base ** 1 = base
                 }
             }
             _ => Ok(None),
@@ -1939,7 +1842,7 @@ impl Value {
     /// proper reference counting. Using `.clone()` directly will bypass reference counting
     /// and cause memory leaks or double-frees.
     #[must_use]
-    pub fn clone_with_heap(&self, heap: &mut Heap<impl ResourceTracker>) -> Self {
+    pub fn clone_with_heap(&self, heap: &Heap<impl ResourceTracker>) -> Self {
         match self {
             Self::Ref(id) => {
                 heap.inc_ref(*id);
@@ -1985,26 +1888,6 @@ impl Value {
     /// Attempting to clone a Ref variant will panic.
     pub fn clone_immediate(&self) -> Self {
         match self {
-            Self::Ref(_) => panic!("Ref clones must go through clone_with_heap to maintain refcounts"),
-            #[cfg(feature = "ref-count-panic")]
-            Self::Dereferenced => panic!("Cannot clone Dereferenced object"),
-            _ => self.copy_for_extend(),
-        }
-    }
-
-    /// Creates a shallow copy of this Value without incrementing reference counts.
-    ///
-    /// IMPORTANT: For Ref variants, this copies the ValueId but does NOT increment
-    /// the reference count. The caller MUST call `heap.inc_ref()` separately for any
-    /// Ref variants to maintain correct reference counting.
-    ///
-    /// For Closure variants, this copies without incrementing cell ref counts.
-    /// The caller MUST increment ref counts on the captured cells separately.
-    ///
-    /// This is useful when you need to copy Objects from a borrowed heap context
-    /// and will increment refcounts in a separate step.
-    pub(crate) fn copy_for_extend(&self) -> Self {
-        match self {
             Self::Undefined => Self::Undefined,
             Self::Ellipsis => Self::Ellipsis,
             Self::None => Self::None,
@@ -2021,7 +1904,7 @@ impl Value {
             Self::Marker(m) => Self::Marker(*m),
             Self::Property(p) => Self::Property(*p),
             Self::ExternalFuture(call_id) => Self::ExternalFuture(*call_id),
-            Self::Ref(id) => Self::Ref(*id), // Caller must increment refcount!
+            Self::Ref(_) => panic!("Ref clones must go through clone_with_heap to maintain refcounts"),
             #[cfg(feature = "ref-count-panic")]
             Self::Dereferenced => panic!("Cannot copy Dereferenced object"),
         }

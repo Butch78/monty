@@ -1,4 +1,4 @@
-use std::fmt::Write;
+use std::{cmp::Ordering, fmt::Write};
 
 use ahash::AHashSet;
 use itertools::Itertools;
@@ -322,6 +322,39 @@ impl PyTrait for List {
         }
         guard.decrease();
         Ok(true)
+    }
+
+    /// Lexicographic ordering comparison for lists.
+    ///
+    /// Same algorithm as tuple comparison: uses `py_eq` to find the first
+    /// differing pair, then `py_cmp` on that pair. If all compared elements
+    /// are equal, the shorter list is "less than" the longer one.
+    fn py_cmp(
+        &self,
+        other: &Self,
+        heap: &mut Heap<impl ResourceTracker>,
+        guard: &mut DepthGuard,
+        interns: &Interns,
+    ) -> Result<Option<Ordering>, ResourceError> {
+        guard.increase_err()?;
+
+        let min_len = self.items.len().min(other.items.len());
+        for i in 0..min_len {
+            heap.check_time()?;
+            let a = &self.items[i];
+            let b = &other.items[i];
+
+            if a.py_eq(b, heap, guard, interns)? {
+                continue;
+            }
+
+            let result = a.py_cmp(b, heap, guard, interns)?;
+            guard.decrease();
+            return Ok(result);
+        }
+
+        guard.decrease();
+        Ok(self.items.len().partial_cmp(&other.items.len()))
     }
 
     fn py_dec_ref_ids(&mut self, stack: &mut Vec<HeapId>) {
