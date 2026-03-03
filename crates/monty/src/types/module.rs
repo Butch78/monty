@@ -104,11 +104,11 @@ impl Module {
     /// the Property itself - this implements Python's descriptor protocol.
     pub fn py_getattr(
         &self,
-        attr_id: StringId,
+        attr: &EitherStr,
         heap: &mut Heap<impl ResourceTracker>,
         interns: &Interns,
     ) -> Option<AttrCallResult> {
-        let value = self.attrs.get_by_str(interns.get_str(attr_id), heap, interns)?;
+        let value = self.attrs.get_by_str(attr.as_str(interns), heap, interns)?;
 
         // If the value is a Property, invoke its getter to compute the actual value
         if let Value::Property(prop) = *value {
@@ -125,7 +125,7 @@ impl Module {
     ///
     /// Returns `AttrCallResult` because module functions may need OS operations
     /// (e.g., `os.getenv()`) that require host involvement.
-    pub fn py_call_attr_raw(
+    pub fn py_call_attr(
         &self,
         _self_id: HeapId,
         vm: &mut VM<'_, '_, impl ResourceTracker>,

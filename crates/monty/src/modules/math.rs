@@ -27,7 +27,7 @@ use smallvec::smallvec;
 
 use crate::{
     args::ArgValues,
-    defer_drop,
+    defer_drop, defer_drop_mut,
     exception_private::{ExcType, RunResult, SimpleException},
     heap::{Heap, HeapData, HeapId},
     intern::{Interns, StaticStrings},
@@ -210,6 +210,7 @@ pub(super) fn call(
     heap: &mut Heap<impl ResourceTracker>,
     function: MathFunctions,
     args: ArgValues,
+    interns: &Interns,
 ) -> RunResult<Value> {
     match function {
         // Rounding
@@ -235,7 +236,7 @@ pub(super) fn call(
         MathFunctions::Isinf => math_isinf(heap, args),
         MathFunctions::Isfinite => math_isfinite(heap, args),
         MathFunctions::Copysign => math_copysign(heap, args),
-        MathFunctions::Isclose => math_isclose(heap, args),
+        MathFunctions::Isclose => math_isclose(heap, args, interns),
         MathFunctions::Nextafter => math_nextafter(heap, args),
         MathFunctions::Ulp => math_ulp(heap, args),
         // Trigonometric
@@ -635,9 +636,9 @@ fn math_copysign(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunR
 ///
 /// Supports keyword-only `rel_tol` and `abs_tol` parameters matching CPython.
 /// Raises `ValueError` if either tolerance is negative.
-fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
+fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues, interns: &Interns) -> RunResult<Value> {
     let (positional, kwargs) = args.into_parts();
-    defer_drop!(positional, heap);
+    defer_drop_mut!(positional, heap);
 
     // Extract exactly two positional args
     let Some(a_val) = positional.next() else {
@@ -645,7 +646,6 @@ fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunRe
     };
     defer_drop!(a_val, heap);
     let Some(b_val) = positional.next() else {
-        a_val.drop_with_heap(heap);
         return Err(ExcType::type_error_at_least("math.isclose", 2, 1));
     };
     defer_drop!(b_val, heap);
@@ -657,7 +657,7 @@ fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunRe
     let b = value_to_float(b_val, "math.isclose", heap)?;
 
     // Parse optional keyword arguments rel_tol and abs_tol
-    let (rel_tol, abs_tol) = extract_isclose_kwargs(kwargs, heap)?;
+    let (rel_tol, abs_tol) = extract_isclose_kwargs(kwargs, heap, interns)?;
 
     if rel_tol < 0.0 {
         return Err(
@@ -697,9 +697,8 @@ fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunRe
 fn extract_isclose_kwargs(
     kwargs: crate::args::KwargsValues,
     heap: &mut Heap<impl ResourceTracker>,
+    interns: &Interns,
 ) -> RunResult<(f64, f64)> {
-    use crate::heap::DropWithHeap;
-
     let mut rel_tol: f64 = 1e-9;
     let mut abs_tol: f64 = 0.0;
 
@@ -715,7 +714,7 @@ fn extract_isclose_kwargs(
             return Err(ExcType::type_error("keywords must be strings"));
         };
 
-        let key_str = keyword_name.as_str(&heap.interns().clone());
+        let key_str = keyword_name.as_str(interns);
         match key_str {
             "rel_tol" => {
                 rel_tol = value_to_float(value, "math.isclose", heap)?;
@@ -1030,10 +1029,10 @@ fn math_factorial(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> Run
 /// The result is always non-negative.
 fn math_gcd(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
     let positional = args.into_pos_only("math.gcd", heap)?;
-    defer_drop!(positional, heap);
+    defer_drop_mut!(positional, heap);
 
     let mut result: u64 = 0;
-    for arg in positional {
+    while let Some(arg) = positional.next() {
         defer_drop!(arg, heap);
         let n = value_to_int(arg, "math.gcd", heap)?;
         result = gcd(result, n.unsigned_abs());
@@ -1048,10 +1047,10 @@ fn math_gcd(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
 /// The result is always non-negative. Returns 0 if any argument is 0.
 fn math_lcm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
     let positional = args.into_pos_only("math.lcm", heap)?;
-    defer_drop!(positional, heap);
+    defer_drop_mut!(positional, heap);
 
     let mut result: u64 = 1;
-    for arg in positional {
+    while let Some(arg) = positional.next() {
         defer_drop!(arg, heap);
         let n = value_to_int(arg, "math.lcm", heap)?;
         let abs_n = n.unsigned_abs();
