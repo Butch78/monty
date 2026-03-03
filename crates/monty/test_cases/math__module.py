@@ -1376,3 +1376,57 @@ assert e == 0, 'frexp(-0.0) exponent is 0'
 # === comb with GCD reduction (values that would overflow intermediate without it) ===
 assert math.comb(62, 31) == 465428353255261088, 'comb(62, 31) with GCD reduction'
 assert math.comb(61, 30) == 232714176627630544, 'comb(61, 30) with GCD reduction'
+
+# === isclose arg count errors ===
+threw = False
+try:
+    math.isclose()
+except TypeError:
+    threw = True
+assert threw, 'isclose with 0 args raises TypeError'
+
+threw = False
+try:
+    math.isclose(1.0)
+except TypeError:
+    threw = True
+assert threw, 'isclose with 1 arg raises TypeError'
+
+threw = False
+try:
+    math.isclose(1.0, 2.0, 3.0)
+except TypeError:
+    threw = True
+assert threw, 'isclose with 3 positional args raises TypeError'
+
+# === perm(-1) single-arg error message ===
+threw = False
+try:
+    math.perm(-1)
+except ValueError:
+    threw = True
+assert threw, 'perm(-1) single-arg raises ValueError'
+
+# === gcd/lcm with i64::MIN-like values (u64 promotion) ===
+# gcd(-9223372036854775808, 0) should return 9223372036854775808 (exceeds i64::MAX)
+big_gcd = math.gcd(-9223372036854775808, 0)
+assert big_gcd == 9223372036854775808, 'gcd(i64::MIN, 0) promotes to LongInt'
+
+# === isqrt large values (Newton's method refinement) ===
+# Values near i64::MAX where f64 sqrt loses precision
+assert math.isqrt(9223372036854775807) == 3037000499, 'isqrt(i64::MAX)'
+assert math.isqrt(9223372030926249001) == 3037000499, 'isqrt(3037000499^2)'
+assert math.isqrt(9223372030926249000) == 3037000498, 'isqrt(3037000499^2 - 1)'
+
+# === erf/erfc range coverage ===
+# Small x (|x| < 0.84375): exercises PP/QQ polynomial
+assert math.erf(0.1) == 0.1124629160182849, 'erf(0.1) small-x range'
+assert math.erf(0.5) == 0.5204998778130465, 'erf(0.5) small-x range'
+
+# Medium x (1.25 ≤ |x| < 28): exercises erfc_inner path
+assert math.erf(2.0) == 0.9953222650189527, 'erf(2.0) medium-x range'
+assert math.erf(5.0) == 0.9999999999984626, 'erf(5.0) large-x range'
+
+# erfc in range 3 (1.25 ≤ |x| < 2.857): exercises RA/SA coefficients
+erfc_2 = math.erfc(2.0)
+assert math.isclose(erfc_2, 0.004677734981047266, rel_tol=1e-12), 'erfc(2.0) range 3'

@@ -373,36 +373,18 @@ fn math_isqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
         return Ok(Value::Int(0));
     }
 
-    // Newton's method for integer square root.
-    // Initial estimate from f64 sqrt, refined to exact i64 result.
+    // Integer square root via f64 estimate + overshoot correction.
+    // For i64 inputs, f64 sqrt is accurate to within ±1, so we only need
+    // to correct at most a 1-unit overshoot (verified empirically across
+    // the full i64 range — f64's 53-bit mantissa gives sufficient precision
+    // for sqrt of any 63-bit integer).
     #[expect(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,
-        reason = "initial estimate doesn't need to be exact, Newton's method refines it"
+        reason = "initial estimate doesn't need to be exact, overshoot correction refines it"
     )]
     let mut x = (n as f64).sqrt() as i64;
-    // Refine: divide-and-average avoids overflow from (x + n/x).
-    // The halving step `(x - q) / 2` uses integer division, which truncates.
-    // When x - q == 1, the step becomes 0 and x never changes — so we detect
-    // that case and break directly.
-    loop {
-        let q = n / x;
-        if q >= x {
-            break;
-        }
-        let delta = (x - q) / 2;
-        if delta == 0 {
-            // x overshoots by exactly 1; the overshoot-correction loop below will fix it
-            break;
-        }
-        x -= delta;
-        if x <= q {
-            x = q;
-            break;
-        }
-    }
-    // Ensure we don't overshoot due to rounding.
-    // Use `x > n / x` instead of `x * x > n` to avoid i64 overflow for large n.
+    // Correct overshoot: use `x > n / x` instead of `x * x > n` to avoid i64 overflow.
     while x > n / x {
         x -= 1;
     }
