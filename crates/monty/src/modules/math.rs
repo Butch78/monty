@@ -1073,19 +1073,19 @@ fn math_comb(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
         // result = result * (n - i) / (i + 1)
         // By dividing both numerator and denominator by their GCD first,
         // we reduce the chance of overflow in the multiplication step.
-        let mut numer = n - i;
-        let mut denom = i + 1;
+        let mut numerator = n - i;
+        let mut denominator = i + 1;
         #[expect(clippy::cast_sign_loss, reason = "both values are known non-negative at this point")]
-        let g = gcd(numer as u64, denom as u64).cast_signed();
-        numer /= g;
-        denom /= g;
+        let g = gcd(numerator as u64, denominator as u64).cast_signed();
+        numerator /= g;
+        denominator /= g;
         // Also reduce against the running result
-        #[expect(clippy::cast_sign_loss, reason = "result and denom are known non-negative")]
-        let g2 = gcd(result as u64, denom as u64).cast_signed();
+        #[expect(clippy::cast_sign_loss, reason = "result and denominator are known non-negative")]
+        let g2 = gcd(result as u64, denominator as u64).cast_signed();
         result /= g2;
-        denom /= g2;
-        debug_assert!(denom == 1, "denom should be 1 after GCD reduction in comb");
-        match result.checked_mul(numer) {
+        denominator /= g2;
+        debug_assert!(denominator == 1, "denominator should be 1 after GCD reduction in comb");
+        match result.checked_mul(numerator) {
             Some(v) => result = v,
             None => {
                 return Err(SimpleException::new_msg(ExcType::OverflowError, "integer overflow in comb").into());
