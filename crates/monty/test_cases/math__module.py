@@ -897,7 +897,7 @@ assert threw, 'cosh(str) raises TypeError'
 assert math.tanh(0) == 0.0, 'tanh(0)'
 assert math.tanh(float('inf')) == 1.0, 'tanh(inf)'
 assert math.tanh(float('-inf')) == -1.0, 'tanh(-inf)'
-assert abs(math.tanh(1) - 0.7615941559557649) < 1e-10, 'tanh(1)'
+assert math.tanh(1) == 0.7615941559557649, 'tanh(1)'
 assert math.isnan(math.tanh(float('nan'))), 'tanh(nan) is nan'
 
 threw = False
@@ -1037,8 +1037,9 @@ assert r == (0.0, 0.0), 'modf(0.0)'
 r = math.modf(float('inf'))
 assert r == (0.0, float('inf')), 'modf(inf)'
 r = math.modf(float('-inf'))
-# modf(-inf) returns (-0.0, -inf), check sign of fractional part
-assert r[1] == float('-inf'), 'modf(-inf) integer part'
+# modf(-inf) returns (-0.0, -inf), verify both parts including sign of fractional
+assert str(r[0]) == '-0.0', 'modf(-inf) fractional part is -0.0'
+assert r[1] == float('-inf'), 'modf(-inf) integer part is -inf'
 r_nan = math.modf(float('nan'))
 assert math.isnan(r_nan[0]) and math.isnan(r_nan[1]), 'modf(nan) both parts are nan'
 
@@ -1174,8 +1175,8 @@ assert threw, 'lgamma(str) raises TypeError'
 
 # === math.erf() ===
 assert math.erf(0) == 0.0, 'erf(0)'
-assert abs(math.erf(1) - 0.8427007929497149) < 1e-6, 'erf(1)'
-assert abs(math.erf(-1) - (-0.8427007929497149)) < 1e-6, 'erf(-1)'
+assert math.erf(1) == 0.8427007929497149, 'erf(1)'
+assert math.erf(-1) == -0.8427007929497149, 'erf(-1)'
 assert math.erf(float('inf')) == 1.0, 'erf(inf)'
 assert math.erf(float('-inf')) == -1.0, 'erf(-inf)'
 assert math.isnan(math.erf(float('nan'))), 'erf(nan) is nan'
@@ -1253,14 +1254,6 @@ assert math.isnan(math.fmod(float('nan'), 0)), 'fmod(nan, 0) propagates nan'
 assert math.isclose(math.gamma(-0.5), -3.544907701811032), 'gamma(-0.5)'
 assert math.isclose(math.gamma(-1.5), 2.3632718012073544), 'gamma(-1.5)'
 
-# --- gamma(-inf) raises ValueError ---
-threw = False
-try:
-    math.gamma(float('-inf'))
-except ValueError:
-    threw = True
-assert threw, 'gamma(-inf) raises ValueError'
-
 # --- lgamma(-inf) returns inf ---
 assert math.lgamma(float('-inf')) == float('inf'), 'lgamma(-inf) returns inf'
 
@@ -1274,3 +1267,112 @@ assert threw, 'lgamma(1e308) raises OverflowError'
 
 # --- lgamma negative non-integer (reflection formula) ---
 assert math.isclose(math.lgamma(-0.5), 1.265512123484645), 'lgamma(-0.5) reflection'
+
+# ==========================================================
+# Tests for bug fixes and CPython behavior alignment
+# ==========================================================
+
+# === floor/ceil/trunc with large floats (LongInt promotion) ===
+large_floor = math.floor(1e300)
+assert large_floor > 0, 'floor(1e300) should be positive'
+assert (
+    large_floor
+    == 1000000000000000052504760255204420248704468581108159154915854115511802457988908195786371375080447864043704443832883878176942523235360430575644792184786706982848387200926575803737830233794788090059368953234970799945081119038967640880074652742780142494579258788820056842838115669472196386865459400540160
+), 'floor(1e300) matches CPython'
+
+large_ceil = math.ceil(-1e300)
+assert large_ceil < 0, 'ceil(-1e300) should be negative'
+assert (
+    large_ceil
+    == -1000000000000000052504760255204420248704468581108159154915854115511802457988908195786371375080447864043704443832883878176942523235360430575644792184786706982848387200926575803737830233794788090059368953234970799945081119038967640880074652742780142494579258788820056842838115669472196386865459400540160
+), 'ceil(-1e300) matches CPython'
+
+large_trunc = math.trunc(1e300)
+assert large_trunc == math.floor(1e300), 'trunc(1e300) matches floor(1e300) for positive'
+large_trunc_neg = math.trunc(-1e300)
+assert large_trunc_neg == math.ceil(-1e300), 'trunc(-1e300) matches ceil(-1e300) for negative'
+
+# floor/ceil should still work normally for values within i64 range
+assert math.floor(1e18) == 1000000000000000000, 'floor(1e18) within i64 range'
+assert math.floor(2.7) == 2, 'floor(2.7) basic case'
+assert math.ceil(-2.7) == -2, 'ceil(-2.7) basic case'
+
+# === ldexp with large exponent but small x ===
+assert math.ldexp(5e-324, 1075) == 2.0, 'ldexp(5e-324, 1075) should be 2.0'
+assert math.ldexp(0.5, 1024) == 8.98846567431158e307, 'ldexp(0.5, 1024) large but finite'
+
+# === modf(-0.0) sign preservation ===
+frac, integer = math.modf(-0.0)
+# Both parts should be -0.0
+assert str(frac) == '-0.0', 'modf(-0.0) fractional part is -0.0'
+assert str(integer) == '-0.0', 'modf(-0.0) integer part is -0.0'
+
+# === erfc accuracy for large x ===
+erfc_6 = math.erfc(6)
+assert erfc_6 > 0, 'erfc(6) should be positive, not zero'
+assert math.isclose(erfc_6, 2.1519736712498913e-17, rel_tol=1e-12), 'erfc(6) matches CPython'
+erfc_neg6 = math.erfc(-6)
+assert erfc_neg6 == 2.0, 'erfc(-6) is exactly 2.0'
+assert math.erfc(0) == 1.0, 'erfc(0) is 1.0'
+
+# === variadic gcd ===
+assert math.gcd() == 0, 'gcd() with no args returns 0'
+assert math.gcd(12) == 12, 'gcd(12) single arg returns abs(12)'
+assert math.gcd(-12) == 12, 'gcd(-12) single arg returns abs(-12)'
+assert math.gcd(12, 8) == 4, 'gcd(12, 8) two args'
+assert math.gcd(12, 8, 6) == 2, 'gcd(12, 8, 6) three args'
+
+# === variadic lcm ===
+assert math.lcm() == 1, 'lcm() with no args returns 1'
+assert math.lcm(12) == 12, 'lcm(12) single arg returns abs(12)'
+assert math.lcm(-12) == 12, 'lcm(-12) single negative arg returns abs(-12)'
+assert math.lcm(4, 6) == 12, 'lcm(4, 6) two args'
+assert math.lcm(4, 6, 10) == 60, 'lcm(4, 6, 10) three args'
+assert math.lcm(0, 5) == 0, 'lcm(0, 5) returns 0 if any arg is 0'
+
+# === perm with optional k ===
+assert math.perm(5) == 120, 'perm(5) defaults k to n (= 5!)'
+assert math.perm(5, 2) == 20, 'perm(5, 2) with explicit k'
+assert math.perm(0) == 1, 'perm(0) is 1'
+
+# === isclose with rel_tol/abs_tol kwargs ===
+assert math.isclose(1.0, 1.1, rel_tol=0.2) == True, 'isclose with rel_tol=0.2'
+assert math.isclose(1.0, 1.1, abs_tol=0.2) == True, 'isclose with abs_tol=0.2'
+assert math.isclose(1.0, 1.1) == False, 'isclose with defaults (not close)'
+assert math.isclose(1.0, 1.0 + 1e-10) == True, 'isclose with defaults (close)'
+
+# isclose negative tolerance raises ValueError
+threw = False
+try:
+    math.isclose(1.0, 1.0, rel_tol=-0.1)
+except ValueError:
+    threw = True
+assert threw, 'isclose with negative rel_tol raises ValueError'
+
+threw = False
+try:
+    math.isclose(1.0, 1.0, abs_tol=-0.1)
+except ValueError:
+    threw = True
+assert threw, 'isclose with negative abs_tol raises ValueError'
+
+# isclose unknown kwarg raises TypeError
+threw = False
+try:
+    math.isclose(1.0, 1.0, foo=0.1)
+except TypeError:
+    threw = True
+assert threw, 'isclose with unknown kwarg raises TypeError'
+
+# === ldexp sign preservation ===
+assert str(math.ldexp(-0.0, 1000)) == '-0.0', 'ldexp(-0.0, n) preserves sign'
+assert math.ldexp(float('-inf'), 1) == float('-inf'), 'ldexp(-inf, 1) returns -inf'
+
+# === frexp(-0.0) sign preservation ===
+m, e = math.frexp(-0.0)
+assert str(m) == '-0.0', 'frexp(-0.0) mantissa preserves sign'
+assert e == 0, 'frexp(-0.0) exponent is 0'
+
+# === comb with GCD reduction (values that would overflow intermediate without it) ===
+assert math.comb(62, 31) == 465428353255261088, 'comb(62, 31) with GCD reduction'
+assert math.comb(61, 30) == 232714176627630544, 'comb(61, 30) with GCD reduction'

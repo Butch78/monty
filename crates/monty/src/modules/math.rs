@@ -349,7 +349,7 @@ fn math_sqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.sqrt", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.sqrt", heap)?;
+    let f = value_to_float(value, heap)?;
     if f < 0.0 {
         Err(SimpleException::new_msg(ExcType::ValueError, format!("expected a nonnegative input, got {f:?}")).into())
     } else {
@@ -365,7 +365,7 @@ fn math_isqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.isqrt", heap)?;
     defer_drop!(value, heap);
 
-    let n = value_to_int(value, "math.isqrt", heap)?;
+    let n = value_to_int(value, heap)?;
     if n < 0 {
         return Err(SimpleException::new_msg(ExcType::ValueError, "isqrt() argument must be nonnegative").into());
     }
@@ -416,7 +416,7 @@ fn math_cbrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.cbrt", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.cbrt", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(f.cbrt()))
 }
 
@@ -430,8 +430,8 @@ fn math_pow(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     defer_drop!(x_val, heap);
     defer_drop!(y_val, heap);
 
-    let x = value_to_float(x_val, "math.pow", heap)?;
-    let y = value_to_float(y_val, "math.pow", heap)?;
+    let x = value_to_float(x_val, heap)?;
+    let y = value_to_float(y_val, heap)?;
     let result = x.powf(y);
     // CPython raises ValueError for domain errors: 0**negative, negative**non-integer
     if result.is_nan() && !x.is_nan() && !y.is_nan() {
@@ -452,7 +452,7 @@ fn math_exp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let value = args.get_one_arg("math.exp", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.exp", heap)?;
+    let f = value_to_float(value, heap)?;
     let result = f.exp();
     if result.is_infinite() && f.is_finite() {
         return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
@@ -465,7 +465,7 @@ fn math_exp2(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.exp2", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.exp2", heap)?;
+    let f = value_to_float(value, heap)?;
     let result = f.exp2();
     if result.is_infinite() && f.is_finite() {
         return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
@@ -480,7 +480,7 @@ fn math_expm1(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.expm1", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.expm1", heap)?;
+    let f = value_to_float(value, heap)?;
     let result = f.exp_m1();
     if result.is_infinite() && f.is_finite() {
         return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
@@ -502,14 +502,14 @@ fn math_log(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     defer_drop!(x_val, heap);
     defer_drop!(base_val, heap);
 
-    let x = value_to_float(x_val, "math.log", heap)?;
+    let x = value_to_float(x_val, heap)?;
     if x <= 0.0 {
         return Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into());
     }
 
     match base_val {
         Some(base_v) => {
-            let base = value_to_float(base_v, "math.log", heap)?;
+            let base = value_to_float(base_v, heap)?;
             // base == 1.0 causes division by zero in log(x)/log(base), matching
             // CPython which raises ZeroDivisionError for this case.
             #[expect(
@@ -536,7 +536,7 @@ fn math_log1p(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.log1p", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.log1p", heap)?;
+    let f = value_to_float(value, heap)?;
     if f <= -1.0 {
         return Err(
             SimpleException::new_msg(ExcType::ValueError, format!("expected argument value > -1, got {f:?}")).into(),
@@ -553,7 +553,7 @@ fn math_log2(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.log2", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.log2", heap)?;
+    let f = value_to_float(value, heap)?;
     if f <= 0.0 {
         Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into())
     } else {
@@ -569,7 +569,7 @@ fn math_log10(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.log10", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.log10", heap)?;
+    let f = value_to_float(value, heap)?;
     if f <= 0.0 {
         Err(SimpleException::new_msg(ExcType::ValueError, "expected a positive input").into())
     } else {
@@ -588,7 +588,7 @@ fn math_fabs(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.fabs", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.fabs", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(f.abs()))
 }
 
@@ -597,7 +597,7 @@ fn math_isnan(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.isnan", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.isnan", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Bool(f.is_nan()))
 }
 
@@ -606,7 +606,7 @@ fn math_isinf(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.isinf", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.isinf", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Bool(f.is_infinite()))
 }
 
@@ -615,7 +615,7 @@ fn math_isfinite(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunR
     let value = args.get_one_arg("math.isfinite", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.isfinite", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Bool(f.is_finite()))
 }
 
@@ -627,8 +627,8 @@ fn math_copysign(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunR
     defer_drop!(x_val, heap);
     defer_drop!(y_val, heap);
 
-    let x = value_to_float(x_val, "math.copysign", heap)?;
-    let y = value_to_float(y_val, "math.copysign", heap)?;
+    let x = value_to_float(x_val, heap)?;
+    let y = value_to_float(y_val, heap)?;
     Ok(Value::Float(x.copysign(y)))
 }
 
@@ -653,21 +653,17 @@ fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues, interns:
         return Err(ExcType::type_error_at_most("math.isclose", 2, 2 + positional.len()));
     }
 
-    let a = value_to_float(a_val, "math.isclose", heap)?;
-    let b = value_to_float(b_val, "math.isclose", heap)?;
+    let a = value_to_float(a_val, heap)?;
+    let b = value_to_float(b_val, heap)?;
 
     // Parse optional keyword arguments rel_tol and abs_tol
     let (rel_tol, abs_tol) = extract_isclose_kwargs(kwargs, heap, interns)?;
 
     if rel_tol < 0.0 {
-        return Err(
-            SimpleException::new_msg(ExcType::ValueError, "tolerances must be non-negative").into(),
-        );
+        return Err(SimpleException::new_msg(ExcType::ValueError, "tolerances must be non-negative").into());
     }
     if abs_tol < 0.0 {
-        return Err(
-            SimpleException::new_msg(ExcType::ValueError, "tolerances must be non-negative").into(),
-        );
+        return Err(SimpleException::new_msg(ExcType::ValueError, "tolerances must be non-negative").into());
     }
 
     // Exact equality check matches CPython's isclose() behavior — two identical
@@ -717,14 +713,14 @@ fn extract_isclose_kwargs(
         let key_str = keyword_name.as_str(interns);
         match key_str {
             "rel_tol" => {
-                rel_tol = value_to_float(value, "math.isclose", heap)?;
+                rel_tol = value_to_float(value, heap)?;
             }
             "abs_tol" => {
-                abs_tol = value_to_float(value, "math.isclose", heap)?;
+                abs_tol = value_to_float(value, heap)?;
             }
             other => {
                 return Err(ExcType::type_error(format!(
-                    "'{other}' is an invalid keyword argument for math.isclose()"
+                    "isclose() got an unexpected keyword argument '{other}'"
                 )));
             }
         }
@@ -739,8 +735,8 @@ fn math_nextafter(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> Run
     defer_drop!(x_val, heap);
     defer_drop!(y_val, heap);
 
-    let x = value_to_float(x_val, "math.nextafter", heap)?;
-    let y = value_to_float(y_val, "math.nextafter", heap)?;
+    let x = value_to_float(x_val, heap)?;
+    let y = value_to_float(y_val, heap)?;
 
     // Use bit manipulation to compute nextafter, matching C's nextafter behavior:
     // - If x == y, return y
@@ -758,7 +754,7 @@ fn math_ulp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let value = args.get_one_arg("math.ulp", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.ulp", heap)?;
+    let f = value_to_float(value, heap)?;
     if f.is_nan() {
         return Ok(Value::Float(f64::NAN));
     }
@@ -786,7 +782,7 @@ fn math_sin(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let value = args.get_one_arg("math.sin", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.sin", heap)?;
+    let f = value_to_float(value, heap)?;
     require_finite(f)?;
     Ok(Value::Float(f.sin()))
 }
@@ -796,7 +792,7 @@ fn math_cos(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let value = args.get_one_arg("math.cos", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.cos", heap)?;
+    let f = value_to_float(value, heap)?;
     require_finite(f)?;
     Ok(Value::Float(f.cos()))
 }
@@ -806,7 +802,7 @@ fn math_tan(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let value = args.get_one_arg("math.tan", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.tan", heap)?;
+    let f = value_to_float(value, heap)?;
     require_finite(f)?;
     Ok(Value::Float(f.tan()))
 }
@@ -818,7 +814,7 @@ fn math_asin(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.asin", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.asin", heap)?;
+    let f = value_to_float(value, heap)?;
     // NaN passes through (asin(nan) = nan), but out-of-range finite values raise
     if !f.is_nan() && !(-1.0..=1.0).contains(&f) {
         return Err(SimpleException::new_msg(
@@ -837,7 +833,7 @@ fn math_acos(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.acos", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.acos", heap)?;
+    let f = value_to_float(value, heap)?;
     // NaN passes through (acos(nan) = nan), but out-of-range finite values raise
     if !f.is_nan() && !(-1.0..=1.0).contains(&f) {
         return Err(SimpleException::new_msg(
@@ -854,7 +850,7 @@ fn math_atan(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.atan", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.atan", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(f.atan()))
 }
 
@@ -865,8 +861,8 @@ fn math_atan2(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     defer_drop!(y_val, heap);
     defer_drop!(x_val, heap);
 
-    let y = value_to_float(y_val, "math.atan2", heap)?;
-    let x = value_to_float(x_val, "math.atan2", heap)?;
+    let y = value_to_float(y_val, heap)?;
+    let x = value_to_float(x_val, heap)?;
     Ok(Value::Float(y.atan2(x)))
 }
 
@@ -879,7 +875,7 @@ fn math_sinh(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.sinh", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.sinh", heap)?;
+    let f = value_to_float(value, heap)?;
     let result = f.sinh();
     if result.is_infinite() && f.is_finite() {
         return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
@@ -892,7 +888,7 @@ fn math_cosh(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.cosh", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.cosh", heap)?;
+    let f = value_to_float(value, heap)?;
     let result = f.cosh();
     if result.is_infinite() && f.is_finite() {
         return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
@@ -905,7 +901,7 @@ fn math_tanh(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.tanh", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.tanh", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(f.tanh()))
 }
 
@@ -914,7 +910,7 @@ fn math_asinh(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.asinh", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.asinh", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(f.asinh()))
 }
 
@@ -925,7 +921,7 @@ fn math_acosh(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.acosh", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.acosh", heap)?;
+    let f = value_to_float(value, heap)?;
     if f < 1.0 {
         return Err(SimpleException::new_msg(
             ExcType::ValueError,
@@ -943,7 +939,7 @@ fn math_atanh(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.atanh", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.atanh", heap)?;
+    let f = value_to_float(value, heap)?;
     if f <= -1.0 || f >= 1.0 {
         return Err(SimpleException::new_msg(
             ExcType::ValueError,
@@ -963,7 +959,7 @@ fn math_degrees(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunRe
     let value = args.get_one_arg("math.degrees", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.degrees", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(f.to_degrees()))
 }
 
@@ -972,7 +968,7 @@ fn math_radians(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunRe
     let value = args.get_one_arg("math.radians", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.radians", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(f.to_radians()))
 }
 
@@ -1032,9 +1028,9 @@ fn math_gcd(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     defer_drop_mut!(positional, heap);
 
     let mut result: u64 = 0;
-    while let Some(arg) = positional.next() {
+    for arg in positional.by_ref() {
         defer_drop!(arg, heap);
-        let n = value_to_int(arg, "math.gcd", heap)?;
+        let n = value_to_int(arg, heap)?;
         result = gcd(result, n.unsigned_abs());
     }
     u64_to_value(result, heap)
@@ -1050,9 +1046,9 @@ fn math_lcm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     defer_drop_mut!(positional, heap);
 
     let mut result: u64 = 1;
-    while let Some(arg) = positional.next() {
+    for arg in positional.by_ref() {
         defer_drop!(arg, heap);
-        let n = value_to_int(arg, "math.lcm", heap)?;
+        let n = value_to_int(arg, heap)?;
         let abs_n = n.unsigned_abs();
         if abs_n == 0 {
             return Ok(Value::Int(0));
@@ -1074,8 +1070,8 @@ fn math_comb(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     defer_drop!(n_val, heap);
     defer_drop!(k_val, heap);
 
-    let n = value_to_int(n_val, "math.comb", heap)?;
-    let k = value_to_int(k_val, "math.comb", heap)?;
+    let n = value_to_int(n_val, heap)?;
+    let k = value_to_int(k_val, heap)?;
 
     if n < 0 {
         return Err(SimpleException::new_msg(ExcType::ValueError, "n must be a non-negative integer").into());
@@ -1097,13 +1093,13 @@ fn math_comb(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
         // we reduce the chance of overflow in the multiplication step.
         let mut numer = n - i;
         let mut denom = i + 1;
-        #[expect(clippy::cast_sign_loss, reason = "both values are known positive at this point")]
-        let g = gcd(numer as u64, denom as u64) as i64;
+        #[expect(clippy::cast_sign_loss, reason = "both values are known non-negative at this point")]
+        let g = gcd(numer as u64, denom as u64).cast_signed();
         numer /= g;
         denom /= g;
         // Also reduce against the running result
-        #[expect(clippy::cast_sign_loss, reason = "result and denom are known positive")]
-        let g2 = gcd(result as u64, denom as u64) as i64;
+        #[expect(clippy::cast_sign_loss, reason = "result and denom are known non-negative")]
+        let g2 = gcd(result as u64, denom as u64).cast_signed();
         result /= g2;
         denom /= g2;
         debug_assert!(denom == 1, "denom should be 1 after GCD reduction in comb");
@@ -1125,17 +1121,24 @@ fn math_perm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let (n_val, k_val) = args.get_one_two_args("math.perm", heap)?;
     defer_drop!(n_val, heap);
 
-    let n = value_to_int(n_val, "math.perm", heap)?;
+    let n = value_to_int(n_val, heap)?;
+    let k_explicit = k_val.is_some();
     let k = match k_val {
         Some(kv) => {
             defer_drop!(kv, heap);
-            value_to_int(kv, "math.perm", heap)?
+            value_to_int(kv, heap)?
         }
         None => n,
     };
 
     if n < 0 {
-        return Err(SimpleException::new_msg(ExcType::ValueError, "n must be a non-negative integer").into());
+        // When called as perm(n) without k, CPython uses the factorial error message
+        let msg = if k_explicit {
+            "n must be a non-negative integer"
+        } else {
+            "factorial() not defined for negative values"
+        };
+        return Err(SimpleException::new_msg(ExcType::ValueError, msg).into());
     }
     if k < 0 {
         return Err(SimpleException::new_msg(ExcType::ValueError, "k must be a non-negative integer").into());
@@ -1169,8 +1172,8 @@ fn math_fmod(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     defer_drop!(x_val, heap);
     defer_drop!(y_val, heap);
 
-    let x = value_to_float(x_val, "math.fmod", heap)?;
-    let y = value_to_float(y_val, "math.fmod", heap)?;
+    let x = value_to_float(x_val, heap)?;
+    let y = value_to_float(y_val, heap)?;
 
     if y == 0.0 || x.is_infinite() {
         // CPython raises for both fmod(x, 0) and fmod(inf, y)
@@ -1190,8 +1193,8 @@ fn math_remainder(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> Run
     defer_drop!(x_val, heap);
     defer_drop!(y_val, heap);
 
-    let x = value_to_float(x_val, "math.remainder", heap)?;
-    let y = value_to_float(y_val, "math.remainder", heap)?;
+    let x = value_to_float(x_val, heap)?;
+    let y = value_to_float(y_val, heap)?;
 
     // NaN propagates
     if x.is_nan() || y.is_nan() {
@@ -1220,7 +1223,7 @@ fn math_modf(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.modf", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.modf", heap)?;
+    let f = value_to_float(value, heap)?;
 
     // Special cases: modf(inf) = (0.0, inf), modf(nan) = (nan, nan)
     if f.is_nan() {
@@ -1255,7 +1258,7 @@ fn math_frexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.frexp", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.frexp", heap)?;
+    let f = value_to_float(value, heap)?;
 
     if f == 0.0 || f.is_nan() || f.is_infinite() {
         // Special cases: frexp(0) = (0.0, 0), frexp(nan) = (nan, 0), frexp(inf) = (inf, 0)
@@ -1302,23 +1305,22 @@ fn math_ldexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     defer_drop!(x_val, heap);
     defer_drop!(i_val, heap);
 
-    let x = value_to_float(x_val, "math.ldexp", heap)?;
-    let i = value_to_int(i_val, "math.ldexp", heap)?;
+    let x = value_to_float(x_val, heap)?;
+    let i = value_to_int(i_val, heap)?;
 
     // Special cases: inf/nan/zero pass through regardless of exponent
     if x.is_nan() || x.is_infinite() || x == 0.0 {
         return Ok(Value::Float(x));
     }
 
-    // Use successive doubling/halving to compute x * 2^i, stepping by at most
-    // 1023 (positive) or 1022 (negative) per iteration to stay within IEEE 754
-    // exponent range for the scaling factors.
-    //
-    // We don't check `i` against fixed thresholds because small `x` with large `i`
-    // (or vice versa) can still produce finite results (e.g. ldexp(5e-324, 1075) == 2.0).
-    // Instead, we let the math proceed and check the result for overflow/underflow.
+    // Clamp extreme exponents to bound the loop iterations. IEEE 754 double precision
+    // has exponents from -1074 (smallest subnormal) to +1023 (largest finite). A finite
+    // float `x` has exponent in [-1074, 1023], so the result exponent is `exp_x + i`.
+    // If `i > 2100`, even the smallest subnormal (exp -1074) would overflow to infinity.
+    // If `i < -2100`, even the largest finite (exp 1023) would underflow to zero.
+    // Clamping to ±2100 is safe and limits the loop to at most ~3 iterations.
     let mut result = x;
-    let mut exp = i;
+    let mut exp = i.clamp(-2100, 2100);
     while exp > 0 {
         let step = exp.min(1023);
         result *= f64::from_bits(((1023 + step) as u64) << 52);
@@ -1354,7 +1356,7 @@ fn math_gamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     let value = args.get_one_arg("math.gamma", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.gamma", heap)?;
+    let f = value_to_float(value, heap)?;
     // CPython raises ValueError for -inf
     if f == f64::NEG_INFINITY {
         return Err(SimpleException::new_msg(
@@ -1388,7 +1390,7 @@ fn math_lgamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunRes
     let value = args.get_one_arg("math.lgamma", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.lgamma", heap)?;
+    let f = value_to_float(value, heap)?;
     // Check for non-positive integers (poles of the gamma function)
     if f <= 0.0 && f == f.floor() && f.is_finite() {
         return Err(SimpleException::new_msg(
@@ -1410,7 +1412,7 @@ fn math_erf(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let value = args.get_one_arg("math.erf", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.erf", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(erf_impl(f)))
 }
 
@@ -1421,7 +1423,7 @@ fn math_erfc(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let value = args.get_one_arg("math.erfc", heap)?;
     defer_drop!(value, heap);
 
-    let f = value_to_float(value, "math.erfc", heap)?;
+    let f = value_to_float(value, heap)?;
     Ok(Value::Float(erfc_impl(f)))
 }
 
@@ -1442,7 +1444,9 @@ fn float_to_int_checked(rounded: f64, original: f64, heap: &mut Heap<impl Resour
         Err(SimpleException::new_msg(ExcType::OverflowError, "cannot convert float infinity to integer").into())
     } else if original.is_nan() {
         Err(SimpleException::new_msg(ExcType::ValueError, "cannot convert float NaN to integer").into())
-    } else if rounded >= i64::MIN as f64 && rounded <= i64::MAX as f64 {
+    } else if rounded >= i64::MIN as f64 && rounded < i64::MAX as f64 {
+        // Note: `i64::MAX as f64` rounds up to 2^63 (9223372036854775808.0), so we use
+        // strict less-than to exclude that value. `i64::MIN as f64` is exact (-2^63).
         #[expect(
             clippy::cast_possible_truncation,
             reason = "intentional: value is within i64 range after bounds check"
@@ -1469,7 +1473,7 @@ fn float_to_int_checked(rounded: f64, original: f64, heap: &mut Heap<impl Resour
     clippy::cast_precision_loss,
     reason = "i64-to-f64 can lose precision for large integers (beyond 2^53), but this matches CPython's conversion semantics"
 )]
-fn value_to_float(value: &Value, _func_name: &str, heap: &Heap<impl ResourceTracker>) -> RunResult<f64> {
+fn value_to_float(value: &Value, heap: &Heap<impl ResourceTracker>) -> RunResult<f64> {
     match value {
         Value::Float(f) => Ok(*f),
         Value::Int(n) => Ok(*n as f64),
@@ -1485,7 +1489,7 @@ fn value_to_float(value: &Value, _func_name: &str, heap: &Heap<impl ResourceTrac
 ///
 /// Accepts `Int` and `Bool` values. For other types, raises a `TypeError`
 /// with a message matching CPython's format.
-fn value_to_int(value: &Value, _func_name: &str, heap: &Heap<impl ResourceTracker>) -> RunResult<i64> {
+fn value_to_int(value: &Value, heap: &Heap<impl ResourceTracker>) -> RunResult<i64> {
     match value {
         Value::Int(n) => Ok(*n),
         Value::Bool(b) => Ok(i64::from(*b)),
@@ -1696,67 +1700,196 @@ fn lanczos_lgamma(x: f64) -> f64 {
     0.5 * (2.0 * std::f64::consts::PI).ln() + (z + 0.5) * t.ln() - t + sum.ln()
 }
 
-/// Error function implementation using Horner's method with rational approximation.
+/// Error function with full double precision (~15 significant digits).
 ///
-/// Uses the Abramowitz and Stegun approximation (formula 7.1.26) which provides
-/// a maximum error of 1.5×10⁻⁷.
-#[expect(clippy::items_after_statements, reason = "constants grouped near their usage")]
+/// Uses a piecewise rational polynomial approximation derived from the
+/// Sun Microsystems / FreeBSD implementation (also used by musl and glibc).
+/// The algorithm splits the domain into ranges with tailored rational
+/// approximations for each:
+///
+/// - `|x| < 0.84375`: Direct rational approximation `x + x * P(x²)/Q(x²)`
+/// - `0.84375 ≤ |x| < 1.25`: Approximation around `erf(1) ≈ 0.8450629`
+/// - `1.25 ≤ |x| < 28`: Computed via `erfc` with rational approximations
+/// - `|x| ≥ 28`: Returns ±1 (erfc is below f64 precision)
 fn erf_impl(x: f64) -> f64 {
     if x.is_nan() {
         return f64::NAN;
     }
-    if x == 0.0 {
-        return 0.0;
-    }
-    let sign = if x < 0.0 { -1.0 } else { 1.0 };
-    let x = x.abs();
-    if x >= 6.0 {
-        // erf(x) is essentially ±1 for |x| >= 6
-        return sign;
-    }
+    let abs_x = x.abs();
+    let sign = x.signum();
 
-    // Abramowitz & Stegun 7.1.26
-    const A1: f64 = 0.254_829_592;
-    const A2: f64 = -0.284_496_736;
-    const A3: f64 = 1.421_413_741;
-    const A4: f64 = -1.453_152_027;
-    const A5: f64 = 1.061_405_429;
-    const P: f64 = 0.327_591_1;
-
-    let t = 1.0 / (1.0 + P * x);
-    let y = 1.0 - (((((A5 * t + A4) * t) + A3) * t + A2) * t + A1) * t * (-x * x).exp();
-    sign * y
+    if abs_x < 0.843_75 {
+        // |x| < 0.84375: erf(x) = x + x * P(x²) / Q(x²)
+        if abs_x < f64::from_bits(0x3E30_0000_0000_0000) {
+            // |x| < 2^-28: erf(x) ≈ x * (2/√π) to avoid underflow
+            return x + EFX * x;
+        }
+        let z = x * x;
+        let r = PP0 + z * (PP1 + z * (PP2 + z * (PP3 + z * PP4)));
+        let s = 1.0 + z * (QQ1 + z * (QQ2 + z * (QQ3 + z * (QQ4 + z * QQ5))));
+        x + x * (r / s)
+    } else if abs_x < 1.25 {
+        // 0.84375 ≤ |x| < 1.25: erf(x) = erx + P1(|x|-1) / Q1(|x|-1)
+        let s = abs_x - 1.0;
+        let p = PA0 + s * (PA1 + s * (PA2 + s * (PA3 + s * (PA4 + s * (PA5 + s * PA6)))));
+        let q = 1.0 + s * (QA1 + s * (QA2 + s * (QA3 + s * (QA4 + s * (QA5 + s * QA6)))));
+        sign * (ERX + p / q)
+    } else if abs_x >= 28.0 {
+        sign
+    } else {
+        // 1.25 ≤ |x| < 28: compute via erfc
+        sign * (1.0 - erfc_inner(abs_x))
+    }
 }
 
-/// Complementary error function: erfc(x) = 1 - erf(x).
+/// Complementary error function with full double precision (~15 significant digits).
 ///
-/// For small-to-moderate `|x|` (< 6), computes as `1 - erf(x)`.
-/// For large `|x|` (>= 6), uses a continued fraction approximation to avoid
-/// catastrophic cancellation from subtracting two nearly-equal values. The
-/// approximation is: `erfc(x) ≈ exp(-x²) / (x * √π) * CF(x)` where CF is
-/// a truncated continued fraction that converges rapidly for large x.
+/// Uses the same piecewise rational polynomial as `erf_impl`. Avoids catastrophic
+/// cancellation for large `|x|` by computing `erfc` directly rather than `1 - erf(x)`.
+///
+/// The algorithm uses range-specific rational approximations:
+/// - `|x| < 0.84375`: Computed via `1 - erf(x)` (safe, no cancellation)
+/// - `0.84375 ≤ |x| < 1.25`: Direct approximation around `erfc(1) ≈ 0.1549370`
+/// - `1.25 ≤ |x| < 28`: `erfc(x) = exp(-x²) * R(1/x²) / S(1/x²)` with two sub-ranges
+/// - `|x| ≥ 28`: Returns 0 (positive x) or 2 (negative x)
 fn erfc_impl(x: f64) -> f64 {
     if x.is_nan() {
         return f64::NAN;
     }
     let abs_x = x.abs();
-    if abs_x < 6.0 {
+
+    if abs_x < 0.843_75 {
+        // Small x: no cancellation risk, safe to compute 1 - erf(x) directly
         return 1.0 - erf_impl(x);
     }
-
-    // For large |x|, use the continued fraction approximation.
-    // erfc(x) = exp(-x²) / (x * sqrt(π)) * (1 / (1 + 1/(2x² + 2/(1 + 3/(2x² + 4/(1 + ...))))))
-    // We evaluate a few terms of this expansion for sufficient accuracy.
-    let x2 = abs_x * abs_x;
-    // Evaluate continued fraction from the tail: a_n / (b_n + a_{n+1} / (b_{n+1} + ...))
-    // Terms alternate between b=2x² and b=1, with a=1, 2, 3, 4, ...
-    let mut cf = 0.0;
-    for n in (1..=20).rev() {
-        let a = n as f64 / 2.0;
-        let b = if n % 2 == 0 { 1.0 } else { 2.0 * x2 };
-        cf = a / (b + cf);
+    if abs_x >= 28.0 {
+        return if x < 0.0 { 2.0 } else { 0.0 };
     }
-    let result = (-x2).exp() / (abs_x * std::f64::consts::PI.sqrt()) / (1.0 + cf);
+
+    let result = if abs_x < 1.25 {
+        // 0.84375 ≤ |x| < 1.25
+        let s = abs_x - 1.0;
+        let p = PA0 + s * (PA1 + s * (PA2 + s * (PA3 + s * (PA4 + s * (PA5 + s * PA6)))));
+        let q = 1.0 + s * (QA1 + s * (QA2 + s * (QA3 + s * (QA4 + s * (QA5 + s * QA6)))));
+        if x < 0.0 { 1.0 + ERX + p / q } else { 1.0 - ERX - p / q }
+    } else {
+        erfc_inner(abs_x)
+    };
 
     if x < 0.0 { 2.0 - result } else { result }
 }
+
+/// Inner erfc computation for `1.25 ≤ |x| < 28` using rational polynomial
+/// approximation of exp(x²) · erfc(x).
+///
+/// Uses two sub-ranges with different coefficient sets for optimal accuracy:
+/// - `1.25 ≤ |x| < 1/0.35 ≈ 2.857`: Coefficients RA0-RA7 / SA1-SA8
+/// - `2.857 ≤ |x| < 28`: Coefficients RB0-RB6 / SB1-SB7
+///
+/// The result is computed as `exp(-x² - 0.5625) * exp(correction) * R/S`
+/// where the exp is split to preserve precision.
+fn erfc_inner(abs_x: f64) -> f64 {
+    let s = 1.0 / (abs_x * abs_x);
+    let (r, sv) = if abs_x < 1.0 / 0.35 {
+        // 1.25 ≤ |x| < ~2.857
+        let r = RA0 + s * (RA1 + s * (RA2 + s * (RA3 + s * (RA4 + s * (RA5 + s * (RA6 + s * RA7))))));
+        let sv = 1.0 + s * (SA1 + s * (SA2 + s * (SA3 + s * (SA4 + s * (SA5 + s * (SA6 + s * (SA7 + s * SA8)))))));
+        (r, sv)
+    } else {
+        // 2.857 ≤ |x| < 28
+        let r = RB0 + s * (RB1 + s * (RB2 + s * (RB3 + s * (RB4 + s * (RB5 + s * RB6)))));
+        let sv = 1.0 + s * (SB1 + s * (SB2 + s * (SB3 + s * (SB4 + s * (SB5 + s * (SB6 + s * SB7))))));
+        (r, sv)
+    };
+    // Split exp(-x²) into exp(-z²) * exp(z²-x²) for precision.
+    // Zero the low 32 bits of abs_x to get z (the "high word" trick).
+    let z = f64::from_bits(abs_x.to_bits() & 0xFFFF_FFFF_0000_0000);
+    (-z * z - 0.5625).exp() * ((z - abs_x) * (z + abs_x) + r / sv).exp() / abs_x
+}
+
+// =============================
+// erf/erfc rational polynomial coefficients
+// =============================
+// From Sun Microsystems / FreeBSD libm (s_erf.c), also used by musl and glibc.
+// These provide full double-precision accuracy (~15 significant digits).
+
+// Coefficients from Sun Microsystems / FreeBSD libm (s_erf.c), also used by musl and glibc.
+// Trailing digits are kept exactly as the reference to guarantee bit-identical constants.
+// Some constants have trailing zeros that trigger clippy::excessive_precision but are
+// preserved for traceability back to the reference implementation.
+
+/// erf(0.84375) — the precomputed value at the first range boundary.
+const ERX: f64 = 8.450_629_115_104_675e-01;
+
+/// Coefficient for tiny-x approximation: 2/√π - 1.
+const EFX: f64 = 1.283_791_670_955_125_7e-01;
+
+// --- Range 1: |x| < 0.84375 ---
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const PP0: f64 = 1.283_791_670_955_125_59e-01;
+const PP1: f64 = -3.250_421_072_470_015e-01;
+const PP2: f64 = -2.848_174_957_559_851e-02;
+const PP3: f64 = -5.770_270_296_489_442e-03;
+const PP4: f64 = -2.376_301_665_665_016_3e-05;
+const QQ1: f64 = 3.979_172_239_591_554e-01;
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const QQ2: f64 = 6.502_224_998_876_729e-02;
+const QQ3: f64 = 5.081_306_281_875_766e-03;
+const QQ4: f64 = 1.324_947_380_043_216e-04;
+const QQ5: f64 = -3.960_228_278_775_368e-06;
+
+// --- Range 2: 0.84375 ≤ |x| < 1.25 ---
+const PA0: f64 = -2.362_118_560_752_659e-03;
+const PA1: f64 = 4.148_561_186_837_483e-01;
+const PA2: f64 = -3.722_078_760_357_013e-01;
+const PA3: f64 = 3.183_466_199_011_618e-01;
+const PA4: f64 = -1.108_946_942_823_967e-01;
+const PA5: f64 = 3.547_830_432_561_824e-02;
+const PA6: f64 = -2.166_375_594_868_791e-03;
+const QA1: f64 = 1.064_208_804_008_442e-01;
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const QA2: f64 = 5.403_979_177_021_710e-01;
+const QA3: f64 = 7.182_865_441_419_627e-02;
+const QA4: f64 = 1.261_712_198_087_616e-01;
+const QA5: f64 = 1.363_708_391_202_905e-02;
+const QA6: f64 = 1.198_449_984_679_911e-02;
+
+// --- Range 3: 1.25 ≤ |x| < ~2.857 ---
+const RA0: f64 = -9.864_944_034_847_148e-03;
+const RA1: f64 = -6.938_585_727_071_818e-01;
+const RA2: f64 = -1.055_862_622_532_329_1e+01;
+const RA3: f64 = -6.237_533_245_032_601e+01;
+const RA4: f64 = -1.623_966_694_625_735e+02;
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const RA5: f64 = -1.846_050_929_067_110e+02;
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const RA6: f64 = -8.128_743_550_630_659e+01;
+const RA7: f64 = -9.814_329_344_169_145e+00;
+const SA1: f64 = 1.965_127_166_743_926e+01;
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const SA2: f64 = 1.376_577_541_435_190e+02;
+const SA3: f64 = 4.345_658_774_752_292e+02;
+const SA4: f64 = 6.453_872_717_332_679e+02;
+const SA5: f64 = 4.290_081_400_275_678e+02;
+const SA6: f64 = 1.086_350_055_417_794e+02;
+const SA7: f64 = 6.570_249_770_319_282e+00;
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const SA8: f64 = -6.042_441_521_485_810e-02;
+
+// --- Range 4: ~2.857 ≤ |x| < 28 ---
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const RB0: f64 = -9.864_942_924_700_099e-03;
+#[expect(clippy::excessive_precision, reason = "FreeBSD libm reference constant")]
+const RB1: f64 = -7.992_832_376_805_230e-01;
+const RB2: f64 = -1.775_795_491_775_475_2e+01;
+const RB3: f64 = -1.606_363_848_558_219_2e+02;
+const RB4: f64 = -6.375_664_433_683_896e+02;
+const RB5: f64 = -1.025_095_131_611_077e+03;
+const RB6: f64 = -4.835_191_916_086_514e+02;
+const SB1: f64 = 3.033_806_074_348_246e+01;
+const SB2: f64 = 3.257_925_129_965_739e+02;
+const SB3: f64 = 1.536_729_586_084_437e+03;
+const SB4: f64 = 3.199_858_219_508_596e+03;
+const SB5: f64 = 2.553_050_406_433_164e+03;
+const SB6: f64 = 4.745_285_412_069_554e+02;
+const SB7: f64 = -2.244_095_244_658_582e+01;

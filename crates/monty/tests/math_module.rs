@@ -2,14 +2,14 @@ use monty::{MontyObject, MontyRun};
 
 /// Helper to run a Python expression and return the result.
 fn run_expr(code: &str) -> MontyObject {
-    let ex = MontyRun::new(code.to_owned(), "test.py", vec![], vec![]).unwrap();
+    let ex = MontyRun::new(code.to_owned(), "test.py", vec![]).unwrap();
     ex.run_no_limits(vec![]).unwrap()
 }
 
 /// Helper to run Python code that is expected to raise an exception.
 /// Returns the exception message string.
 fn run_expect_error(code: &str) -> String {
-    let ex = MontyRun::new(code.to_owned(), "test.py", vec![], vec![]).unwrap();
+    let ex = MontyRun::new(code.to_owned(), "test.py", vec![]).unwrap();
     let err = ex.run_no_limits(vec![]).unwrap_err();
     err.to_string()
 }
@@ -29,13 +29,23 @@ fn factorial_i64_overflow() {
     );
 }
 
-/// `math.comb(66, 33)` overflows i64 during the intermediate multiplication.
+/// `math.comb(66, 33)` fits in i64 (7219428434016265740) thanks to GCD reduction
+/// that avoids intermediate overflow. Verify it computes the correct value.
+#[test]
+fn comb_large_but_fits_i64() {
+    let result = run_expr("import math\nmath.comb(66, 33)");
+    let v: i64 = (&result).try_into().unwrap();
+    assert_eq!(v, 7_219_428_434_016_265_740);
+}
+
+/// `math.comb(68, 34)` overflows i64 even with GCD reduction
+/// (68C34 = 28048800420600 * ... > i64::MAX).
 #[test]
 fn comb_i64_overflow() {
-    let msg = run_expect_error("import math\nmath.comb(66, 33)");
+    let msg = run_expect_error("import math\nmath.comb(68, 34)");
     assert!(
         msg.contains("OverflowError"),
-        "Expected OverflowError for comb(66, 33), got: {msg}"
+        "Expected OverflowError for comb(68, 34), got: {msg}"
     );
 }
 
@@ -53,7 +63,7 @@ fn perm_i64_overflow() {
 // ldexp negative exponent loop
 // ==========================
 
-/// `math.ldexp(1.0, -1050)` exercises the negative exponent loop (lines 1227-1230)
+/// `math.ldexp(1.0, -1050)` exercises the negative exponent loop in `math_ldexp`
 /// because -1050 is between -1074 and -1022, requiring iterative halving.
 #[test]
 fn ldexp_large_negative_exponent_loop() {
