@@ -97,10 +97,15 @@ impl ModuleFunctions {
     ///
     /// Returns `AttrCallResult` to support both immediate values and OS calls that
     /// require host involvement (e.g., `os.getenv()` needs the host to provide environment variables).
-    pub fn call(self, heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<AttrCallResult> {
+    pub fn call(
+        self,
+        heap: &mut Heap<impl ResourceTracker>,
+        args: ArgValues,
+        interns: &Interns,
+    ) -> RunResult<AttrCallResult> {
         match self {
             Self::Asyncio(functions) => asyncio::call(heap, functions, args),
-            Self::Math(functions) => math::call(heap, functions, args).map(AttrCallResult::Value),
+            Self::Math(functions) => math::call(heap, functions, args, interns).map(AttrCallResult::Value),
             Self::Os(functions) => os::call(heap, functions, args),
         }
     }

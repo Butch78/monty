@@ -37,7 +37,7 @@ What Monty **can** do:
 * Run async or sync code on the host via async or sync code on the host
 
 What Monty **cannot** do:
-* Use the standard library (except a few select modules: `sys`, `typing`, `asyncio`, `dataclasses` (soon), `json` (soon))
+* Use the standard library (except a few select modules: `sys`, `typing`, `asyncio`, `math`, `dataclasses` (soon), `json` (soon))
 * Use third party libraries (like Pydantic), support for external python library is not a goal
 * define classes (support should come soon)
 * use match statements (again, support should come soon)

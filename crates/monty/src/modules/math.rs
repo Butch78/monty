@@ -22,6 +22,7 @@
 //!
 //! `pi`, `e`, `tau`, `inf`, `nan`
 
+use num_bigint::BigInt;
 use smallvec::smallvec;
 
 use crate::{
@@ -32,7 +33,7 @@ use crate::{
     intern::{Interns, StaticStrings},
     modules::ModuleFunctions,
     resource::{ResourceError, ResourceTracker},
-    types::{Module, PyTrait, allocate_tuple},
+    types::{LongInt, Module, PyTrait, allocate_tuple},
     value::Value,
 };
 
@@ -288,7 +289,7 @@ fn math_floor(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     defer_drop!(value, heap);
 
     match value {
-        Value::Float(f) => float_to_int_checked(f.floor(), *f),
+        Value::Float(f) => float_to_int_checked(f.floor(), *f, heap),
         Value::Int(n) => Ok(Value::Int(*n)),
         Value::Bool(b) => Ok(Value::Int(i64::from(*b))),
         _ => Err(ExcType::type_error(format!(
@@ -307,7 +308,7 @@ fn math_ceil(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     defer_drop!(value, heap);
 
     match value {
-        Value::Float(f) => float_to_int_checked(f.ceil(), *f),
+        Value::Float(f) => float_to_int_checked(f.ceil(), *f, heap),
         Value::Int(n) => Ok(Value::Int(*n)),
         Value::Bool(b) => Ok(Value::Int(i64::from(*b))),
         _ => Err(ExcType::type_error(format!(
@@ -325,7 +326,7 @@ fn math_trunc(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
     defer_drop!(value, heap);
 
     match value {
-        Value::Float(f) => float_to_int_checked(f.trunc(), *f),
+        Value::Float(f) => float_to_int_checked(f.trunc(), *f, heap),
         Value::Int(n) => Ok(Value::Int(*n)),
         Value::Bool(b) => Ok(Value::Int(i64::from(*b))),
         _ => Err(ExcType::type_error(format!(
@@ -630,21 +631,44 @@ fn math_copysign(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunR
     Ok(Value::Float(x.copysign(y)))
 }
 
-/// `math.isclose(a, b)` — returns True if a and b are close to each other.
+/// `math.isclose(a, b, *, rel_tol=1e-9, abs_tol=0.0)` — returns True if a and b are close.
 ///
-/// Uses default tolerances: `rel_tol=1e-9`, `abs_tol=0.0`.
-/// Matches CPython's default behavior without keyword argument support.
+/// Supports keyword-only `rel_tol` and `abs_tol` parameters matching CPython.
+/// Raises `ValueError` if either tolerance is negative.
 fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
-    let (a_val, b_val) = args.get_two_args("math.isclose", heap)?;
+    let (positional, kwargs) = args.into_parts();
+    defer_drop!(positional, heap);
+
+    // Extract exactly two positional args
+    let Some(a_val) = positional.next() else {
+        return Err(ExcType::type_error_at_least("math.isclose", 2, 0));
+    };
     defer_drop!(a_val, heap);
+    let Some(b_val) = positional.next() else {
+        a_val.drop_with_heap(heap);
+        return Err(ExcType::type_error_at_least("math.isclose", 2, 1));
+    };
     defer_drop!(b_val, heap);
+    if positional.len() > 0 {
+        return Err(ExcType::type_error_at_most("math.isclose", 2, 2 + positional.len()));
+    }
 
     let a = value_to_float(a_val, "math.isclose", heap)?;
     let b = value_to_float(b_val, "math.isclose", heap)?;
 
-    // CPython defaults: rel_tol=1e-9, abs_tol=0.0
-    let rel_tol: f64 = 1e-9;
-    let abs_tol: f64 = 0.0;
+    // Parse optional keyword arguments rel_tol and abs_tol
+    let (rel_tol, abs_tol) = extract_isclose_kwargs(kwargs, heap)?;
+
+    if rel_tol < 0.0 {
+        return Err(
+            SimpleException::new_msg(ExcType::ValueError, "tolerances must be non-negative").into(),
+        );
+    }
+    if abs_tol < 0.0 {
+        return Err(
+            SimpleException::new_msg(ExcType::ValueError, "tolerances must be non-negative").into(),
+        );
+    }
 
     // Exact equality check matches CPython's isclose() behavior — two identical
     // values (including infinities) are always considered close.
@@ -665,6 +689,49 @@ fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunRe
     let diff = (a - b).abs();
     let result = diff <= (rel_tol * a.abs()).max(rel_tol * b.abs()).max(abs_tol);
     Ok(Value::Bool(result))
+}
+
+/// Extracts `rel_tol` and `abs_tol` keyword arguments for `math.isclose`.
+///
+/// Returns `(rel_tol, abs_tol)` with defaults of `(1e-9, 0.0)`.
+fn extract_isclose_kwargs(
+    kwargs: crate::args::KwargsValues,
+    heap: &mut Heap<impl ResourceTracker>,
+) -> RunResult<(f64, f64)> {
+    use crate::heap::DropWithHeap;
+
+    let mut rel_tol: f64 = 1e-9;
+    let mut abs_tol: f64 = 0.0;
+
+    if kwargs.is_empty() {
+        return Ok((rel_tol, abs_tol));
+    }
+
+    for (key, value) in kwargs {
+        defer_drop!(key, heap);
+        defer_drop!(value, heap);
+
+        let Some(keyword_name) = key.as_either_str(heap) else {
+            return Err(ExcType::type_error("keywords must be strings"));
+        };
+
+        let key_str = keyword_name.as_str(&heap.interns().clone());
+        match key_str {
+            "rel_tol" => {
+                rel_tol = value_to_float(value, "math.isclose", heap)?;
+            }
+            "abs_tol" => {
+                abs_tol = value_to_float(value, "math.isclose", heap)?;
+            }
+            other => {
+                return Err(ExcType::type_error(format!(
+                    "'{other}' is an invalid keyword argument for math.isclose()"
+                )));
+            }
+        }
+    }
+
+    Ok((rel_tol, abs_tol))
 }
 
 /// `math.nextafter(x, y)` — returns the next float after x towards y.
@@ -956,43 +1023,48 @@ fn math_factorial(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> Run
     Ok(Value::Int(result))
 }
 
-/// `math.gcd(a, b)` — returns the greatest common divisor of two integers.
+/// `math.gcd(*integers)` — returns the greatest common divisor of the arguments.
 ///
+/// Supports 0 or more arguments, matching CPython 3.9+. `gcd()` returns 0,
+/// `gcd(n)` returns `abs(n)`, and for multiple args reduces pairwise.
 /// The result is always non-negative.
 fn math_gcd(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
-    let (a_val, b_val) = args.get_two_args("math.gcd", heap)?;
-    defer_drop!(a_val, heap);
-    defer_drop!(b_val, heap);
+    let positional = args.into_pos_only("math.gcd", heap)?;
+    defer_drop!(positional, heap);
 
-    let a = value_to_int(a_val, "math.gcd", heap)?;
-    let b = value_to_int(b_val, "math.gcd", heap)?;
-    // GCD result is always <= max(|a|, |b|) which fits in i64 since the inputs were i64
-    Ok(Value::Int(gcd(a.unsigned_abs(), b.unsigned_abs()).cast_signed()))
+    let mut result: u64 = 0;
+    for arg in positional {
+        defer_drop!(arg, heap);
+        let n = value_to_int(arg, "math.gcd", heap)?;
+        result = gcd(result, n.unsigned_abs());
+    }
+    u64_to_value(result, heap)
 }
 
-/// `math.lcm(a, b)` — returns the least common multiple of two integers.
+/// `math.lcm(*integers)` — returns the least common multiple of the arguments.
 ///
-/// The result is always non-negative. Returns 0 if either argument is 0.
+/// Supports 0 or more arguments, matching CPython 3.9+. `lcm()` returns 1,
+/// `lcm(n)` returns `abs(n)`, and for multiple args reduces pairwise.
+/// The result is always non-negative. Returns 0 if any argument is 0.
 fn math_lcm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
-    let (a_val, b_val) = args.get_two_args("math.lcm", heap)?;
-    defer_drop!(a_val, heap);
-    defer_drop!(b_val, heap);
+    let positional = args.into_pos_only("math.lcm", heap)?;
+    defer_drop!(positional, heap);
 
-    let a = value_to_int(a_val, "math.lcm", heap)?;
-    let b = value_to_int(b_val, "math.lcm", heap)?;
-
-    if a == 0 || b == 0 {
-        return Ok(Value::Int(0));
+    let mut result: u64 = 1;
+    for arg in positional {
+        defer_drop!(arg, heap);
+        let n = value_to_int(arg, "math.lcm", heap)?;
+        let abs_n = n.unsigned_abs();
+        if abs_n == 0 {
+            return Ok(Value::Int(0));
+        }
+        let g = gcd(result, abs_n);
+        // lcm(a, b) = |a| / gcd(a,b) * |b| — dividing first avoids intermediate overflow
+        result = (result / g)
+            .checked_mul(abs_n)
+            .ok_or_else(|| SimpleException::new_msg(ExcType::OverflowError, "integer overflow in lcm"))?;
     }
-
-    let abs_a = a.unsigned_abs();
-    let abs_b = b.unsigned_abs();
-    let g = gcd(abs_a, abs_b);
-    // lcm(a, b) = |a| / gcd(a,b) * |b| — dividing first avoids intermediate overflow
-    let lcm_u = (abs_a / g)
-        .checked_mul(abs_b)
-        .ok_or_else(|| SimpleException::new_msg(ExcType::OverflowError, "integer overflow in lcm"))?;
-    Ok(Value::Int(lcm_u.cast_signed()))
+    u64_to_value(result, heap)
 }
 
 /// `math.comb(n, k)` — returns the number of ways to choose k items from n.
@@ -1020,9 +1092,24 @@ fn math_comb(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     let k = k.min(n - k);
     let mut result: i64 = 1;
     for i in 0..k {
-        // result = result * (n - i) / (i + 1), done carefully to avoid overflow
-        match result.checked_mul(n - i) {
-            Some(v) => result = v / (i + 1),
+        // Use GCD reduction to keep intermediates small:
+        // result = result * (n - i) / (i + 1)
+        // By dividing both numerator and denominator by their GCD first,
+        // we reduce the chance of overflow in the multiplication step.
+        let mut numer = n - i;
+        let mut denom = i + 1;
+        #[expect(clippy::cast_sign_loss, reason = "both values are known positive at this point")]
+        let g = gcd(numer as u64, denom as u64) as i64;
+        numer /= g;
+        denom /= g;
+        // Also reduce against the running result
+        #[expect(clippy::cast_sign_loss, reason = "result and denom are known positive")]
+        let g2 = gcd(result as u64, denom as u64) as i64;
+        result /= g2;
+        denom /= g2;
+        debug_assert!(denom == 1, "denom should be 1 after GCD reduction in comb");
+        match result.checked_mul(numer) {
+            Some(v) => result = v,
             None => {
                 return Err(SimpleException::new_msg(ExcType::OverflowError, "integer overflow in comb").into());
             }
@@ -1031,16 +1118,22 @@ fn math_comb(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     Ok(Value::Int(result))
 }
 
-/// `math.perm(n, k)` — returns the number of k-length permutations from n items.
+/// `math.perm(n, k=None)` — returns the number of k-length permutations from n items.
 ///
-/// Both arguments must be non-negative integers.
+/// Both arguments must be non-negative integers. When `k` is omitted, defaults to `n`
+/// (i.e., `perm(n)` returns `n!`), matching CPython behavior.
 fn math_perm(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
-    let (n_val, k_val) = args.get_two_args("math.perm", heap)?;
+    let (n_val, k_val) = args.get_one_two_args("math.perm", heap)?;
     defer_drop!(n_val, heap);
-    defer_drop!(k_val, heap);
 
     let n = value_to_int(n_val, "math.perm", heap)?;
-    let k = value_to_int(k_val, "math.perm", heap)?;
+    let k = match k_val {
+        Some(kv) => {
+            defer_drop!(kv, heap);
+            value_to_int(kv, "math.perm", heap)?
+        }
+        None => n,
+    };
 
     if n < 0 {
         return Err(SimpleException::new_msg(ExcType::ValueError, "n must be a non-negative integer").into());
@@ -1143,7 +1236,10 @@ fn math_modf(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     }
 
     let integer = f.trunc();
-    let fractional = f - integer;
+    // Preserve the sign of the input on the fractional part — e.g. modf(-0.0)
+    // should return (-0.0, -0.0), not (0.0, -0.0). Using copysign ensures the
+    // fractional part carries the correct sign even when it's zero.
+    let fractional = (f - integer).copysign(f);
     let tuple = allocate_tuple(smallvec![Value::Float(fractional), Value::Float(integer)], heap)?;
     Ok(tuple)
 }
@@ -1215,29 +1311,25 @@ fn math_ldexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
         return Ok(Value::Float(x));
     }
 
-    // Clamp exponent and check for overflow, matching CPython behavior.
-    let result = if i > 1074 {
-        // Would overflow to infinity — CPython raises OverflowError
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
-    } else if i < -1074 {
-        // Underflows to zero
-        if x > 0.0 { 0.0 } else { -0.0 }
-    } else {
-        // Use successive doubling/halving to avoid intermediate overflow
-        let mut result = x;
-        let mut exp = i;
-        while exp > 0 {
-            let step = exp.min(1023);
-            result *= f64::from_bits(((1023 + step) as u64) << 52);
-            exp -= step;
-        }
-        while exp < 0 {
-            let step = (-exp).min(1022);
-            result *= f64::from_bits(((1023 - step) as u64) << 52);
-            exp += step;
-        }
-        result
-    };
+    // Use successive doubling/halving to compute x * 2^i, stepping by at most
+    // 1023 (positive) or 1022 (negative) per iteration to stay within IEEE 754
+    // exponent range for the scaling factors.
+    //
+    // We don't check `i` against fixed thresholds because small `x` with large `i`
+    // (or vice versa) can still produce finite results (e.g. ldexp(5e-324, 1075) == 2.0).
+    // Instead, we let the math proceed and check the result for overflow/underflow.
+    let mut result = x;
+    let mut exp = i;
+    while exp > 0 {
+        let step = exp.min(1023);
+        result *= f64::from_bits(((1023 + step) as u64) << 52);
+        exp -= step;
+    }
+    while exp < 0 {
+        let step = (-exp).min(1022);
+        result *= f64::from_bits(((1023 - step) as u64) << 52);
+        exp += step;
+    }
 
     // If the result overflowed to infinity, CPython raises OverflowError
     if result.is_infinite() {
@@ -1343,19 +1435,30 @@ fn math_erfc(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
 /// `rounded` is the already-rounded float value (e.g., from `floor()`, `ceil()`, `trunc()`).
 /// `original` is the original input float, used only to determine the error type:
 /// infinity produces `OverflowError`, NaN produces `ValueError`.
-fn float_to_int_checked(rounded: f64, original: f64) -> RunResult<Value> {
+///
+/// For finite values outside the i64 range, promotes to `LongInt` to match CPython's
+/// behavior of returning arbitrary-precision integers from `math.floor`/`ceil`/`trunc`.
+fn float_to_int_checked(rounded: f64, original: f64, heap: &mut Heap<impl ResourceTracker>) -> RunResult<Value> {
     if original.is_infinite() {
         Err(SimpleException::new_msg(ExcType::OverflowError, "cannot convert float infinity to integer").into())
     } else if original.is_nan() {
         Err(SimpleException::new_msg(ExcType::ValueError, "cannot convert float NaN to integer").into())
-    } else {
-        // Saturating cast: values outside i64 range clamp to i64::MIN/MAX
+    } else if rounded >= i64::MIN as f64 && rounded <= i64::MAX as f64 {
         #[expect(
             clippy::cast_possible_truncation,
-            reason = "intentional: after inf/NaN check, float-to-int saturates which is correct behavior"
+            reason = "intentional: value is within i64 range after bounds check"
         )]
         let result = rounded as i64;
         Ok(Value::Int(result))
+    } else {
+        // Value exceeds i64 range — promote to LongInt.
+        // Format with no decimal places and parse as BigInt. This is correct because
+        // `rounded` is already an integer-valued float from floor/ceil/trunc.
+        let s = format!("{rounded:.0}");
+        let bi = s
+            .parse::<BigInt>()
+            .map_err(|_| SimpleException::new_msg(ExcType::ValueError, "float too large to convert to integer"))?;
+        Ok(LongInt::new(bi).into_value(heap)?)
     }
 }
 
@@ -1413,6 +1516,18 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
         a = t;
     }
     a
+}
+
+/// Converts a `u64` result to a `Value`, promoting to `LongInt` if it exceeds `i64::MAX`.
+///
+/// This is needed for operations like `gcd(i64::MIN, 0)` where the unsigned result
+/// (`2^63`) doesn't fit in a signed `i64`.
+fn u64_to_value(n: u64, heap: &mut Heap<impl ResourceTracker>) -> RunResult<Value> {
+    if let Ok(signed) = i64::try_from(n) {
+        Ok(Value::Int(signed))
+    } else {
+        Ok(LongInt::new(BigInt::from(n)).into_value(heap)?)
+    }
 }
 
 /// Rounds a float using "round half to even" (banker's rounding).
@@ -1616,7 +1731,33 @@ fn erf_impl(x: f64) -> f64 {
 
 /// Complementary error function: erfc(x) = 1 - erf(x).
 ///
-/// More accurate than `1 - erf(x)` for large x values.
+/// For small-to-moderate `|x|` (< 6), computes as `1 - erf(x)`.
+/// For large `|x|` (>= 6), uses a continued fraction approximation to avoid
+/// catastrophic cancellation from subtracting two nearly-equal values. The
+/// approximation is: `erfc(x) ≈ exp(-x²) / (x * √π) * CF(x)` where CF is
+/// a truncated continued fraction that converges rapidly for large x.
 fn erfc_impl(x: f64) -> f64 {
-    1.0 - erf_impl(x)
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    let abs_x = x.abs();
+    if abs_x < 6.0 {
+        return 1.0 - erf_impl(x);
+    }
+
+    // For large |x|, use the continued fraction approximation.
+    // erfc(x) = exp(-x²) / (x * sqrt(π)) * (1 / (1 + 1/(2x² + 2/(1 + 3/(2x² + 4/(1 + ...))))))
+    // We evaluate a few terms of this expansion for sufficient accuracy.
+    let x2 = abs_x * abs_x;
+    // Evaluate continued fraction from the tail: a_n / (b_n + a_{n+1} / (b_{n+1} + ...))
+    // Terms alternate between b=2x² and b=1, with a=1, 2, 3, 4, ...
+    let mut cf = 0.0;
+    for n in (1..=20).rev() {
+        let a = n as f64 / 2.0;
+        let b = if n % 2 == 0 { 1.0 } else { 2.0 * x2 };
+        cf = a / (b + cf);
+    }
+    let result = (-x2).exp() / (abs_x * std::f64::consts::PI.sqrt()) / (1.0 + cf);
+
+    if x < 0.0 { 2.0 - result } else { result }
 }
