@@ -16,6 +16,98 @@ use crate::{
     value::{EitherStr, Value},
 };
 
+/// The set operation to perform for binary operators (`|`, `&`, `-`, `^`).
+///
+/// Used by [`binary_set_op`] to dispatch the correct set algebra operation
+/// when binary operators are applied to set-like types in the VM.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SetBinaryOp {
+    /// `|` operator — elements in either set.
+    Union,
+    /// `&` operator — elements in both sets.
+    Intersection,
+    /// `-` operator — elements in left but not right.
+    Difference,
+    /// `^` operator — elements in either set but not both.
+    SymmetricDifference,
+}
+
+/// Performs a binary set operation between two heap-allocated set-like values.
+///
+/// Handles all combinations of Set and FrozenSet as operands. The return type
+/// matches the left operand: `set | frozenset` returns `set`, while
+/// `frozenset | set` returns `frozenset`.
+///
+/// Returns `Ok(None)` if either operand is not a set-like type, allowing
+/// the caller to fall through to the default type error.
+pub(crate) fn binary_set_op(
+    op: SetBinaryOp,
+    lhs_id: HeapId,
+    rhs_id: HeapId,
+    heap: &mut Heap<impl ResourceTracker>,
+    interns: &Interns,
+) -> RunResult<Option<Value>> {
+    // Determine the LHS type (set vs frozenset) to decide the return type
+    let lhs_returns_frozenset = match heap.get(lhs_id) {
+        HeapData::Set(_) => false,
+        HeapData::FrozenSet(_) => true,
+        _ => return Ok(None),
+    };
+
+    // Verify RHS is also set-like
+    if !matches!(heap.get(rhs_id), HeapData::Set(_) | HeapData::FrozenSet(_)) {
+        return Ok(None);
+    }
+
+    // Copy entries from both sets to break the heap borrow, then increment
+    // refcounts on the copies. This is the same pattern used by the method
+    // versions (e.g. `union_from_value`).
+    let lhs_entries = extract_set_entries(lhs_id, heap);
+    let rhs_entries = extract_set_entries(rhs_id, heap);
+    SetStorage::inc_refs_for_entries(&lhs_entries, heap);
+    SetStorage::inc_refs_for_entries(&rhs_entries, heap);
+    let lhs_storage = SetStorage::from_entries(lhs_entries);
+    let rhs_storage = SetStorage::from_entries(rhs_entries);
+
+    // Perform the operation
+    let result_storage = match op {
+        SetBinaryOp::Union => lhs_storage.union(&rhs_storage, heap, interns),
+        SetBinaryOp::Intersection => lhs_storage.intersection(&rhs_storage, heap, interns),
+        SetBinaryOp::Difference => lhs_storage.difference(&rhs_storage, heap, interns),
+        SetBinaryOp::SymmetricDifference => lhs_storage.symmetric_difference(&rhs_storage, heap, interns),
+    };
+
+    // Clean up temporary storages regardless of success/failure
+    lhs_storage.drop_all_values(heap);
+    rhs_storage.drop_all_values(heap);
+
+    let result_storage = result_storage?;
+
+    // Allocate result — return type matches the left operand
+    let heap_id = if lhs_returns_frozenset {
+        heap.allocate(HeapData::FrozenSet(FrozenSet(result_storage)))?
+    } else {
+        heap.allocate(HeapData::Set(Set(result_storage)))?
+    };
+
+    Ok(Some(Value::Ref(heap_id)))
+}
+
+/// Extracts a copy of entries from a set-like heap value.
+///
+/// The returned entries have NOT had their refcounts incremented — the caller
+/// must call [`SetStorage::inc_refs_for_entries`] after the heap borrow is released.
+///
+/// # Panics
+/// Panics if the HeapId does not point to a Set or FrozenSet.
+fn extract_set_entries(id: HeapId, heap: &Heap<impl ResourceTracker>) -> Vec<(Value, u64)> {
+    match heap.get(id) {
+        HeapData::Set(s) => s.0.copy_entries(),
+        HeapData::FrozenSet(s) => s.0.copy_entries(),
+        _ => unreachable!("extract_set_entries called on non-set type"),
+    }
+}
+
 /// Entry in the set storage, containing a value and its cached hash.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct SetEntry {
