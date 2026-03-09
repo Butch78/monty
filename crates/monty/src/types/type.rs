@@ -40,6 +40,9 @@ pub enum Type {
     Tuple,
     NamedTuple,
     Dict,
+    DictKeys,
+    DictItems,
+    DictValues,
     Set,
     FrozenSet,
     Dataclass,
@@ -59,6 +62,10 @@ pub enum Type {
     Path,
     /// A property descriptor - displays as "property"
     Property,
+    /// A compiled regex pattern from `re.compile()` - displays as "re.Pattern"
+    RePattern,
+    /// A regex match result from `re.match()` / `re.search()` etc. - displays as "re.Match"
+    ReMatch,
 }
 
 impl fmt::Display for Type {
@@ -78,6 +85,9 @@ impl fmt::Display for Type {
             Self::Tuple => f.write_str("tuple"),
             Self::NamedTuple => f.write_str("namedtuple"),
             Self::Dict => f.write_str("dict"),
+            Self::DictKeys => f.write_str("dict_keys"),
+            Self::DictItems => f.write_str("dict_items"),
+            Self::DictValues => f.write_str("dict_values"),
             Self::Set => f.write_str("set"),
             Self::FrozenSet => f.write_str("frozenset"),
             Self::Dataclass => f.write_str("dataclass"),
@@ -92,6 +102,8 @@ impl fmt::Display for Type {
             Self::SpecialForm => f.write_str("typing._SpecialForm"),
             Self::Path => f.write_str("PosixPath"),
             Self::Property => f.write_str("property"),
+            Self::RePattern => f.write_str("re.Pattern"),
+            Self::ReMatch => f.write_str("re.Match"),
         }
     }
 }

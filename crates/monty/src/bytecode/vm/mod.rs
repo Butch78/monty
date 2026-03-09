@@ -15,7 +15,7 @@ mod scheduler;
 
 use std::cmp::Ordering;
 
-use call::CallResult;
+pub(crate) use call::CallResult;
 use scheduler::Scheduler;
 
 use crate::{
@@ -187,7 +187,7 @@ macro_rules! handle_load_result {
 macro_rules! handle_call_result {
     ($self:expr, $cached_frame:ident, $result:expr) => {
         match $result {
-            Ok(CallResult::Push(result)) => $self.push(result),
+            Ok(CallResult::Value(result)) => $self.push(result),
             Ok(CallResult::FramePushed) => reload_cache!($self, $cached_frame),
             Ok(CallResult::External(name, args)) => {
                 let call_id = $self.allocate_call_id();
@@ -859,6 +859,13 @@ impl<'a, 'p, T: ResourceTracker> VM<'a, 'p, T> {
                     let value = self.peek().clone_with_heap(self);
                     self.push(value);
                 }
+                Opcode::Dup2 => {
+                    let len = self.stack.len();
+                    let first = self.stack[len - 2].clone_with_heap(self);
+                    let second = self.stack[len - 1].clone_with_heap(self);
+                    self.push(first);
+                    self.push(second);
+                }
                 Opcode::Rot2 => {
                     // Swap top two: [a, b] → [b, a]
                     let len = self.stack.len();
@@ -963,9 +970,9 @@ impl<'a, 'p, T: ResourceTracker> VM<'a, 'p, T> {
                 Opcode::BinaryMod => try_catch_sync!(self, cached_frame, self.binary_mod()),
                 Opcode::BinaryPow => try_catch_sync!(self, cached_frame, self.binary_pow()),
                 // Bitwise operations - only work on integers
-                Opcode::BinaryAnd => try_catch_sync!(self, cached_frame, self.binary_bitwise(BitwiseOp::And)),
-                Opcode::BinaryOr => try_catch_sync!(self, cached_frame, self.binary_bitwise(BitwiseOp::Or)),
-                Opcode::BinaryXor => try_catch_sync!(self, cached_frame, self.binary_bitwise(BitwiseOp::Xor)),
+                Opcode::BinaryAnd => try_catch_sync!(self, cached_frame, self.binary_and()),
+                Opcode::BinaryOr => try_catch_sync!(self, cached_frame, self.binary_or()),
+                Opcode::BinaryXor => try_catch_sync!(self, cached_frame, self.binary_xor()),
                 Opcode::BinaryLShift => {
                     try_catch_sync!(self, cached_frame, self.binary_bitwise(BitwiseOp::LShift));
                 }

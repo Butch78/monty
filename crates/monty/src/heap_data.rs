@@ -12,13 +12,13 @@ use crate::{
     ExcType, ResourceError, ResourceTracker,
     args::ArgValues,
     asyncio::{Coroutine, GatherFuture, GatherItem},
-    bytecode::VM,
+    bytecode::{CallResult, VM},
     exception_private::{RunResult, SimpleException},
     heap::{Heap, HeapId},
     intern::{FunctionId, Interns},
     types::{
-        AttrCallResult, Bytes, Dataclass, Dict, FrozenSet, List, LongInt, Module, MontyIter, NamedTuple, Path, PyTrait,
-        Range, Set, Slice, Str, Tuple, Type,
+        Bytes, Dataclass, Dict, DictItemsView, DictKeysView, DictValuesView, FrozenSet, List, LongInt, Module,
+        MontyIter, NamedTuple, Path, PyTrait, Range, ReMatch, RePattern, Set, Slice, Str, Tuple, Type,
     },
     value::{EitherStr, Value},
 };
@@ -32,6 +32,9 @@ pub(crate) enum HeapDataMut<'a> {
     Tuple(&'a mut Tuple),
     NamedTuple(&'a mut NamedTuple),
     Dict(&'a mut Dict),
+    DictKeysView(&'a mut DictKeysView),
+    DictItemsView(&'a mut DictItemsView),
+    DictValuesView(&'a mut DictValuesView),
     Set(&'a mut Set),
     FrozenSet(&'a mut FrozenSet),
     Closure(&'a mut Closure),
@@ -95,6 +98,16 @@ pub(crate) enum HeapDataMut<'a> {
     /// Pure methods (name, parent, etc.) are handled directly by the VM.
     /// I/O methods (exists, read_text, etc.) yield external function calls.
     Path(&'a mut Path),
+    /// A regex match result from `re.match()`, `re.search()`, etc.
+    ///
+    /// Stores matched text, capture groups, and positions. All data is owned
+    /// (no heap references), so reference counting is trivial.
+    ReMatch(&'a mut ReMatch),
+    /// A compiled regex pattern from `re.compile()`.
+    ///
+    /// Wraps a compiled regex with the original pattern string and flags.
+    /// Custom serde serializes only the pattern and flags, recompiling on deserialize.
+    RePattern(&'a mut RePattern),
     /// Reference to an external function where the name was not interned.
     ///
     /// Created when the host resolves a name lookup to a callable whose name
@@ -250,17 +263,6 @@ impl HeapDataMut<'_> {
                 path.as_str().hash(&mut hasher);
                 Ok(Some(hasher.finish()))
             }
-            // Mutable types, exceptions, iterators, modules, and async types cannot be hashed
-            // (Cell is handled specially in get_or_compute_hash)
-            Self::List(_)
-            | Self::Dict(_)
-            | Self::Set(_)
-            | Self::Cell(_)
-            | Self::Exception(_)
-            | Self::Iter(_)
-            | Self::Module(_)
-            | Self::Coroutine(_)
-            | Self::GatherFuture(_) => Ok(None),
             // LongInt is immutable and hashable
             Self::LongInt(li) => Ok(Some(li.hash())),
             // ExtFunction is hashable by name
@@ -270,6 +272,8 @@ impl HeapDataMut<'_> {
                 name.hash(&mut hasher);
                 Ok(Some(hasher.finish()))
             }
+            // other types cannot be hashed (Cell is handled specially in get_or_compute_hash)
+            _ => Ok(None),
         }
     }
 }
@@ -287,6 +291,9 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Tuple(t) => t.py_type(heap),
             Self::NamedTuple(nt) => nt.py_type(heap),
             Self::Dict(d) => d.py_type(heap),
+            Self::DictKeysView(view) => view.py_type(heap),
+            Self::DictItemsView(view) => view.py_type(heap),
+            Self::DictValuesView(view) => view.py_type(heap),
             Self::Set(s) => s.py_type(heap),
             Self::FrozenSet(fs) => fs.py_type(heap),
             Self::Closure(_) | Self::FunctionDefaults(_) | Self::ExtFunction(_) => Type::Function,
@@ -301,6 +308,8 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Module(_) => Type::Module,
             Self::Coroutine(_) | Self::GatherFuture(_) => Type::Coroutine,
             Self::Path(p) => p.py_type(heap),
+            Self::ReMatch(m) => m.py_type(heap),
+            Self::RePattern(p) => p.py_type(heap),
         }
     }
 
@@ -312,6 +321,9 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Tuple(t) => t.py_estimate_size(),
             Self::NamedTuple(nt) => nt.py_estimate_size(),
             Self::Dict(d) => d.py_estimate_size(),
+            Self::DictKeysView(view) => view.py_estimate_size(),
+            Self::DictItemsView(view) => view.py_estimate_size(),
+            Self::DictValuesView(view) => view.py_estimate_size(),
             Self::Set(s) => s.py_estimate_size(),
             Self::FrozenSet(fs) => fs.py_estimate_size(),
             // TODO: should include size of captured cells and defaults
@@ -336,6 +348,8 @@ impl PyTrait for HeapDataMut<'_> {
                     + gather.pending_calls.len() * std::mem::size_of::<crate::asyncio::CallId>()
             }
             Self::Path(p) => p.py_estimate_size(),
+            Self::ReMatch(m) => m.py_estimate_size(),
+            Self::RePattern(p) => p.py_estimate_size(),
             Self::ExtFunction(s) => std::mem::size_of::<String>() + s.len(),
         }
     }
@@ -348,6 +362,9 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Tuple(t) => t.py_len(heap, interns),
             Self::NamedTuple(nt) => nt.py_len(heap, interns),
             Self::Dict(d) => d.py_len(heap, interns),
+            Self::DictKeysView(view) => view.py_len(heap, interns),
+            Self::DictItemsView(view) => view.py_len(heap, interns),
+            Self::DictValuesView(view) => view.py_len(heap, interns),
             Self::Set(s) => s.py_len(heap, interns),
             Self::FrozenSet(fs) => fs.py_len(heap, interns),
             Self::Range(r) => Some(r.len()),
@@ -385,6 +402,19 @@ impl PyTrait for HeapDataMut<'_> {
                 Ok(true)
             }
             (Self::Dict(a), Self::Dict(b)) => a.py_eq(b, heap, interns),
+            (Self::DictKeysView(a), Self::DictKeysView(b)) => a.py_eq(b, heap, interns),
+            (Self::DictItemsView(a), Self::DictItemsView(b)) => a.py_eq(b, heap, interns),
+            (Self::DictValuesView(_), Self::DictValuesView(_)) => Ok(false),
+            (Self::DictKeysView(a), Self::Set(b)) | (Self::Set(b), Self::DictKeysView(a)) => a.eq_set(b, heap, interns),
+            (Self::DictKeysView(a), Self::FrozenSet(b)) | (Self::FrozenSet(b), Self::DictKeysView(a)) => {
+                a.eq_frozenset(b, heap, interns)
+            }
+            (Self::DictItemsView(a), Self::Set(b)) | (Self::Set(b), Self::DictItemsView(a)) => {
+                a.eq_set(b, heap, interns)
+            }
+            (Self::DictItemsView(a), Self::FrozenSet(b)) | (Self::FrozenSet(b), Self::DictItemsView(a)) => {
+                a.eq_frozenset(b, heap, interns)
+            }
             (Self::Set(a), Self::Set(b)) => a.py_eq(b, heap, interns),
             (Self::FrozenSet(a), Self::FrozenSet(b)) => a.py_eq(b, heap, interns),
             (Self::Closure(a), Self::Closure(b)) => Ok(a.func_id == b.func_id && a.cells == b.cells),
@@ -397,6 +427,10 @@ impl PyTrait for HeapDataMut<'_> {
             (Self::Slice(a), Self::Slice(b)) => a.py_eq(b, heap, interns),
             // Path equality
             (Self::Path(a), Self::Path(b)) => a.py_eq(b, heap, interns),
+            // ReMatch objects are not comparable
+            (Self::ReMatch(a), Self::ReMatch(b)) => a.py_eq(b, heap, interns),
+            // RePattern equality by pattern string and flags
+            (Self::RePattern(a), Self::RePattern(b)) => a.py_eq(b, heap, interns),
             // Cells, Exceptions, Iterators, Modules, and async types compare by identity only (handled at Value level via HeapId comparison)
             (Self::Cell(_), Self::Cell(_))
             | (Self::Exception(_), Self::Exception(_))
@@ -416,6 +450,9 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Tuple(t) => t.py_dec_ref_ids(stack),
             Self::NamedTuple(nt) => nt.py_dec_ref_ids(stack),
             Self::Dict(d) => d.py_dec_ref_ids(stack),
+            Self::DictKeysView(view) => view.py_dec_ref_ids(stack),
+            Self::DictItemsView(view) => view.py_dec_ref_ids(stack),
+            Self::DictValuesView(view) => view.py_dec_ref_ids(stack),
             Self::Set(s) => s.py_dec_ref_ids(stack),
             Self::FrozenSet(fs) => fs.py_dec_ref_ids(stack),
             Self::Closure(closure) => {
@@ -469,6 +506,9 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Tuple(t) => t.py_bool(heap, interns),
             Self::NamedTuple(nt) => nt.py_bool(heap, interns),
             Self::Dict(d) => d.py_bool(heap, interns),
+            Self::DictKeysView(view) => view.py_bool(heap, interns),
+            Self::DictItemsView(view) => view.py_bool(heap, interns),
+            Self::DictValuesView(view) => view.py_bool(heap, interns),
             Self::Set(s) => s.py_bool(heap, interns),
             Self::FrozenSet(fs) => fs.py_bool(heap, interns),
             Self::Closure(_) | Self::FunctionDefaults(_) | Self::ExtFunction(_) => true,
@@ -483,6 +523,8 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Coroutine(_) => true,    // Coroutines are always truthy
             Self::GatherFuture(_) => true, // GatherFutures are always truthy
             Self::Path(p) => p.py_bool(heap, interns),
+            Self::ReMatch(m) => m.py_bool(heap, interns),
+            Self::RePattern(p) => p.py_bool(heap, interns),
         }
     }
 
@@ -500,6 +542,9 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Tuple(t) => t.py_repr_fmt(f, heap, heap_ids, interns),
             Self::NamedTuple(nt) => nt.py_repr_fmt(f, heap, heap_ids, interns),
             Self::Dict(d) => d.py_repr_fmt(f, heap, heap_ids, interns),
+            Self::DictKeysView(view) => view.py_repr_fmt(f, heap, heap_ids, interns),
+            Self::DictItemsView(view) => view.py_repr_fmt(f, heap, heap_ids, interns),
+            Self::DictValuesView(view) => view.py_repr_fmt(f, heap, heap_ids, interns),
             Self::Set(s) => s.py_repr_fmt(f, heap, heap_ids, interns),
             Self::FrozenSet(fs) => fs.py_repr_fmt(f, heap, heap_ids, interns),
             Self::Closure(closure) => interns.get_function(closure.func_id).py_repr_fmt(f, interns, 0),
@@ -520,6 +565,8 @@ impl PyTrait for HeapDataMut<'_> {
             }
             Self::GatherFuture(gather) => write!(f, "<gather({})>", gather.item_count()),
             Self::Path(p) => p.py_repr_fmt(f, heap, heap_ids, interns),
+            Self::ReMatch(m) => m.py_repr_fmt(f, heap, heap_ids, interns),
+            Self::RePattern(p) => p.py_repr_fmt(f, heap, heap_ids, interns),
             Self::ExtFunction(name) => write!(f, "<function '{name}' external>"),
         }
     }
@@ -618,24 +665,43 @@ impl PyTrait for HeapDataMut<'_> {
         }
     }
 
+    fn py_iadd(
+        &mut self,
+        other: &Value,
+        heap: &mut Heap<impl ResourceTracker>,
+        self_id: Option<HeapId>,
+        interns: &Interns,
+    ) -> Result<bool, ResourceError> {
+        match self {
+            Self::List(list) => list.py_iadd(other, heap, self_id, interns),
+            Self::Dict(dict) => dict.py_iadd(other, heap, self_id, interns),
+            _ => Ok(false),
+        }
+    }
+
     fn py_call_attr(
         &mut self,
         self_id: HeapId,
         vm: &mut VM<'_, '_, impl ResourceTracker>,
         attr: &EitherStr,
         args: ArgValues,
-    ) -> RunResult<AttrCallResult> {
+    ) -> RunResult<CallResult> {
         match self {
             Self::Str(s) => s.py_call_attr(self_id, vm, attr, args),
             Self::Bytes(b) => b.py_call_attr(self_id, vm, attr, args),
             Self::List(l) => l.py_call_attr(self_id, vm, attr, args),
             Self::Tuple(t) => t.py_call_attr(self_id, vm, attr, args),
             Self::Dict(d) => d.py_call_attr(self_id, vm, attr, args),
+            Self::DictKeysView(view) => view.py_call_attr(self_id, vm, attr, args),
+            Self::DictItemsView(view) => view.py_call_attr(self_id, vm, attr, args),
+            Self::DictValuesView(view) => view.py_call_attr(self_id, vm, attr, args),
             Self::Set(s) => s.py_call_attr(self_id, vm, attr, args),
             Self::FrozenSet(fs) => fs.py_call_attr(self_id, vm, attr, args),
             Self::Dataclass(dc) => dc.py_call_attr(self_id, vm, attr, args),
             Self::Path(p) => p.py_call_attr(self_id, vm, attr, args),
             Self::Module(m) => m.py_call_attr(self_id, vm, attr, args),
+            Self::ReMatch(m) => m.py_call_attr(self_id, vm, attr, args),
+            Self::RePattern(p) => p.py_call_attr(self_id, vm, attr, args),
             _ => Err(ExcType::attribute_error(self.py_type(vm.heap), attr.as_str(vm.interns))),
         }
     }
@@ -649,6 +715,7 @@ impl PyTrait for HeapDataMut<'_> {
             Self::NamedTuple(nt) => nt.py_getitem(key, heap, interns),
             Self::Dict(d) => d.py_getitem(key, heap, interns),
             Self::Range(r) => r.py_getitem(key, heap, interns),
+            Self::ReMatch(m) => m.py_getitem(key, heap, interns),
             _ => Err(ExcType::type_error_not_sub(self.py_type(heap))),
         }
     }
@@ -675,7 +742,7 @@ impl PyTrait for HeapDataMut<'_> {
         attr: &EitherStr,
         heap: &mut Heap<impl ResourceTracker>,
         interns: &Interns,
-    ) -> RunResult<Option<AttrCallResult>> {
+    ) -> RunResult<Option<CallResult>> {
         match self {
             Self::Dataclass(dc) => dc.py_getattr(attr, heap, interns),
             Self::Module(m) => Ok(m.py_getattr(attr, heap, interns)),
@@ -683,6 +750,8 @@ impl PyTrait for HeapDataMut<'_> {
             Self::Slice(s) => s.py_getattr(attr, heap, interns),
             Self::Exception(exc) => exc.py_getattr(attr, heap, interns),
             Self::Path(p) => p.py_getattr(attr, heap, interns),
+            Self::ReMatch(m) => m.py_getattr(attr, heap, interns),
+            Self::RePattern(p) => p.py_getattr(attr, heap, interns),
             // All other types don't support attribute access via py_getattr
             _ => Ok(None),
         }
