@@ -27,6 +27,7 @@ use smallvec::smallvec;
 
 use crate::{
     args::ArgValues,
+    bytecode::VM,
     defer_drop, defer_drop_mut,
     exception_private::{ExcType, RunResult, SimpleException},
     heap::{Heap, HeapData, HeapId},
@@ -115,7 +116,7 @@ pub(crate) enum MathFunctions {
 ///
 /// # Panics
 /// Panics if the required strings have not been pre-interned during prepare phase.
-pub fn create_module(heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -> Result<HeapId, ResourceError> {
+pub fn create_module(vm: &mut VM<'_, '_, impl ResourceTracker>) -> Result<HeapId, ResourceError> {
     let mut module = Module::new(StaticStrings::Math);
 
     // Register all math functions
@@ -123,19 +124,18 @@ pub fn create_module(heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -
         module.set_attr(
             *name,
             Value::ModuleFunction(ModuleFunctions::Math(*func)),
-            heap,
-            interns,
+            vm,
         );
     }
 
     // Constants
-    module.set_attr(StaticStrings::Pi, Value::Float(std::f64::consts::PI), heap, interns);
-    module.set_attr(StaticStrings::MathE, Value::Float(std::f64::consts::E), heap, interns);
-    module.set_attr(StaticStrings::Tau, Value::Float(std::f64::consts::TAU), heap, interns);
-    module.set_attr(StaticStrings::MathInf, Value::Float(f64::INFINITY), heap, interns);
-    module.set_attr(StaticStrings::MathNan, Value::Float(f64::NAN), heap, interns);
+    module.set_attr(StaticStrings::Pi, Value::Float(std::f64::consts::PI), vm);
+    module.set_attr(StaticStrings::MathE, Value::Float(std::f64::consts::E), vm);
+    module.set_attr(StaticStrings::Tau, Value::Float(std::f64::consts::TAU), vm);
+    module.set_attr(StaticStrings::MathInf, Value::Float(f64::INFINITY), vm);
+    module.set_attr(StaticStrings::MathNan, Value::Float(f64::NAN), vm);
 
-    heap.allocate(HeapData::Module(module))
+    vm.heap.allocate(HeapData::Module(module))
 }
 
 /// Static mapping of attribute names to math functions for module creation.
@@ -207,11 +207,12 @@ const MATH_FUNCTIONS: &[(StaticStrings, MathFunctions)] = &[
 ///
 /// All math functions are pure computations and return `Value` directly.
 pub(super) fn call(
-    heap: &mut Heap<impl ResourceTracker>,
+    vm: &mut VM<'_, '_, impl ResourceTracker>,
     function: MathFunctions,
     args: ArgValues,
-    interns: &Interns,
 ) -> RunResult<Value> {
+    let heap = &mut *vm.heap;
+    let interns = vm.interns;
     match function {
         // Rounding
         MathFunctions::Floor => math_floor(heap, args),
