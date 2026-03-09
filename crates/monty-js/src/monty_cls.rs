@@ -47,7 +47,7 @@ use std::borrow::Cow;
 
 use monty::{
     ExcType, ExtFunctionResult, FunctionCall, LimitedTracker, MontyException, MontyObject, MontyRepl as CoreMontyRepl,
-    MontyRun, NameLookup, NameLookupResult, NoLimitTracker, PrintWriter, PrintWriterCallback, ResourceTracker,
+    MontyRun, NameLookup, NameLookupResult, NoLimitTracker, OsCall, PrintWriter, PrintWriterCallback, ResourceTracker,
     RunProgress,
 };
 use monty_type_checking::{type_check, SourceFile};
@@ -282,11 +282,11 @@ impl Monty {
                                 "Async futures are not supported in synchronous run(). Use start() for async execution.",
                             ));
                         }
-                        RunProgress::OsCall(call) => {
-                            return Err(Error::from_reason(format!(
-                                "OS calls are not supported: {:?}",
-                                call.function,
-                            )));
+                        RunProgress::OsCall(OsCall { function, .. }) => {
+                            return Ok(Either::B(JsMontyException::new(MontyException::new(
+                                ExcType::NotImplementedError,
+                                Some(format!("OS function '{function}' not implemented")),
+                            ))));
                         }
                     }
                 }
@@ -1168,9 +1168,9 @@ impl PrintWriterCallback for CallbackStringPrint<'_> {
 /// `NameLookup` events are surfaced to the host as `MontyNameLookup` instances,
 /// allowing the host to decide how to resolve each name (or let the VM raise `NameError`).
 ///
-/// # Panics
-/// Panics if the progress is `ResolveFutures` or `OsCall` — these are not yet
-/// supported in the JS bindings.
+/// For progress types that are not yet supported in the JS bindings (`ResolveFutures`, `OsCall`),
+/// returns a `JsMontyException` with `NotImplementedError` instead of panicking, matching
+/// the Python bindings behavior.
 fn progress_to_result<T>(
     progress: RunProgress<T>,
     print_callback: Option<JsPrintCallbackRef>,
@@ -1205,12 +1205,14 @@ where
                 print_callback,
             })
         }
-        RunProgress::ResolveFutures(_) => {
-            panic!("Async futures (ResolveFutures) are not yet supported in the JS bindings")
-        }
-        RunProgress::OsCall(call) => {
-            panic!("OS calls are not yet supported in the JS bindings: {:?}", call.function)
-        }
+        RunProgress::ResolveFutures(_) => Either4::D(JsMontyException::new(MontyException::new(
+            ExcType::NotImplementedError,
+            Some("Async futures (ResolveFutures) are not yet supported in the JS bindings".to_owned()),
+        ))),
+        RunProgress::OsCall(OsCall { function, .. }) => Either4::D(JsMontyException::new(MontyException::new(
+            ExcType::NotImplementedError,
+            Some(format!("OS function '{function}' not implemented")),
+        ))),
     }
 }
 
