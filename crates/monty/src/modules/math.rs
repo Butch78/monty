@@ -27,6 +27,7 @@ use smallvec::smallvec;
 
 use crate::{
     args::ArgValues,
+    bytecode::VM,
     defer_drop, defer_drop_mut,
     exception_private::{ExcType, RunResult, SimpleException},
     heap::{Heap, HeapData, HeapId},
@@ -36,6 +37,121 @@ use crate::{
     types::{LongInt, Module, PyTrait, allocate_tuple},
     value::Value,
 };
+
+// ==========================
+// Shared constants and error helpers
+// ==========================
+
+/// Lanczos approximation coefficients for g=7, n=9 (from Paul Godfrey's tables).
+///
+/// Used by both `gamma_impl` and `lgamma_impl` to compute the Lanczos series.
+#[expect(
+    clippy::excessive_precision,
+    clippy::inconsistent_digit_grouping,
+    reason = "Lanczos coefficients require full precision and exact values"
+)]
+const LANCZOS_P: [f64; 9] = [
+    0.999_999_999_999_809_93,
+    676.520_368_121_885_1,
+    -1259.139_216_722_402_8,
+    771.323_428_777_653_08,
+    -176.615_029_162_140_6,
+    12.507_343_278_686_905,
+    -0.138_571_095_265_720_12,
+    9.984_369_578_019_572e-6,
+    1.505_632_735_149_311_6e-7,
+];
+
+/// Lanczos `g` parameter — controls the trade-off between accuracy and convergence.
+const LANCZOS_G: f64 = 7.0;
+
+/// Precomputed `sqrt(2π)` for the Lanczos gamma computation.
+const SQRT_2PI: f64 = 2.506_628_274_631_000_5;
+
+/// Precomputed `0.5 * ln(2π)` for the Lanczos lgamma computation.
+const HALF_LN_2PI: f64 = 0.918_938_533_204_672_8;
+
+/// Returns a `ValueError` with the standard CPython "math domain error" message.
+fn math_domain_error() -> crate::exception_private::RunError {
+    SimpleException::new_msg(ExcType::ValueError, "math domain error").into()
+}
+
+/// Returns an `OverflowError` with the standard CPython "math range error" message.
+fn math_range_error() -> crate::exception_private::RunError {
+    SimpleException::new_msg(ExcType::OverflowError, "math range error").into()
+}
+
+/// Checks whether a computation overflowed (finite input produced infinite result).
+///
+/// Returns `Err(OverflowError("math range error"))` if `result` is infinite
+/// but `input` was finite.
+fn check_range_error(result: f64, input: f64) -> RunResult<()> {
+    if result.is_infinite() && input.is_finite() {
+        Err(math_range_error())
+    } else {
+        Ok(())
+    }
+}
+
+/// Checks that a value is in the `[-1, 1]` range, raising `ValueError` if not.
+///
+/// NaN passes through (it will propagate through the subsequent math operation).
+/// Used by `math.asin` and `math.acos`.
+fn require_unit_range(f: f64) -> RunResult<()> {
+    if !f.is_nan() && !(-1.0..=1.0).contains(&f) {
+        Err(SimpleException::new_msg(
+            ExcType::ValueError,
+            format!("expected a number in range from -1 up to 1, got {f:?}"),
+        )
+        .into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Checks for non-positive integer arguments (poles of the Gamma function).
+///
+/// These are the finite non-positive integers where Gamma diverges to ±∞.
+/// Does NOT reject `-inf` — callers that need to reject it (like `math.gamma`)
+/// must do so separately, since `lgamma(-inf)` is valid and returns `inf`.
+#[expect(
+    clippy::float_cmp,
+    reason = "exact comparison detects integer poles of gamma function"
+)]
+fn check_gamma_pole(f: f64) -> RunResult<()> {
+    if f <= 0.0 && f == f.floor() && f.is_finite() {
+        Err(SimpleException::new_msg(
+            ExcType::ValueError,
+            format!("expected a noninteger or positive integer, got {f:?}"),
+        )
+        .into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Computes the Lanczos series sum for the given `z = x - 1`.
+///
+/// This is the shared core of both `lanczos_gamma` and `lanczos_lgamma`.
+/// Returns `(sum, t)` where `t = z + G + 0.5`.
+fn lanczos_series(z: f64) -> (f64, f64) {
+    let mut sum = LANCZOS_P[0];
+    for (i, &coeff) in LANCZOS_P.iter().enumerate().skip(1) {
+        sum += coeff / (z + i as f64);
+    }
+    let t = z + LANCZOS_G + 0.5;
+    (sum, t)
+}
+
+/// Evaluates the erf/erfc rational polynomial for the `0.84375 ≤ |x| < 1.25` range.
+///
+/// Returns `P(s) / Q(s)` where `s = |x| - 1`.
+fn erf_range2_poly(abs_x: f64) -> f64 {
+    let s = abs_x - 1.0;
+    let p = PA0 + s * (PA1 + s * (PA2 + s * (PA3 + s * (PA4 + s * (PA5 + s * PA6)))));
+    let q = 1.0 + s * (QA1 + s * (QA2 + s * (QA3 + s * (QA4 + s * (QA5 + s * QA6)))));
+    p / q
+}
 
 /// Math module functions — each variant corresponds to a Python-visible function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display, serde::Serialize, serde::Deserialize)]
@@ -115,27 +231,22 @@ pub(crate) enum MathFunctions {
 ///
 /// # Panics
 /// Panics if the required strings have not been pre-interned during prepare phase.
-pub fn create_module(heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -> Result<HeapId, ResourceError> {
+pub fn create_module(vm: &mut VM<'_, '_, impl ResourceTracker>) -> Result<HeapId, ResourceError> {
     let mut module = Module::new(StaticStrings::Math);
 
     // Register all math functions
     for (name, func) in MATH_FUNCTIONS {
-        module.set_attr(
-            *name,
-            Value::ModuleFunction(ModuleFunctions::Math(*func)),
-            heap,
-            interns,
-        );
+        module.set_attr(*name, Value::ModuleFunction(ModuleFunctions::Math(*func)), vm);
     }
 
     // Constants
-    module.set_attr(StaticStrings::Pi, Value::Float(std::f64::consts::PI), heap, interns);
-    module.set_attr(StaticStrings::MathE, Value::Float(std::f64::consts::E), heap, interns);
-    module.set_attr(StaticStrings::Tau, Value::Float(std::f64::consts::TAU), heap, interns);
-    module.set_attr(StaticStrings::MathInf, Value::Float(f64::INFINITY), heap, interns);
-    module.set_attr(StaticStrings::MathNan, Value::Float(f64::NAN), heap, interns);
+    module.set_attr(StaticStrings::Pi, Value::Float(std::f64::consts::PI), vm);
+    module.set_attr(StaticStrings::MathE, Value::Float(std::f64::consts::E), vm);
+    module.set_attr(StaticStrings::Tau, Value::Float(std::f64::consts::TAU), vm);
+    module.set_attr(StaticStrings::MathInf, Value::Float(f64::INFINITY), vm);
+    module.set_attr(StaticStrings::MathNan, Value::Float(f64::NAN), vm);
 
-    heap.allocate(HeapData::Module(module))
+    vm.heap.allocate(HeapData::Module(module))
 }
 
 /// Static mapping of attribute names to math functions for module creation.
@@ -207,73 +318,72 @@ const MATH_FUNCTIONS: &[(StaticStrings, MathFunctions)] = &[
 ///
 /// All math functions are pure computations and return `Value` directly.
 pub(super) fn call(
-    heap: &mut Heap<impl ResourceTracker>,
+    vm: &mut VM<'_, '_, impl ResourceTracker>,
     function: MathFunctions,
     args: ArgValues,
-    interns: &Interns,
 ) -> RunResult<Value> {
     match function {
         // Rounding
-        MathFunctions::Floor => math_floor(heap, args),
-        MathFunctions::Ceil => math_ceil(heap, args),
-        MathFunctions::Trunc => math_trunc(heap, args),
+        MathFunctions::Floor => math_floor(vm.heap, args),
+        MathFunctions::Ceil => math_ceil(vm.heap, args),
+        MathFunctions::Trunc => math_trunc(vm.heap, args),
         // Roots & powers
-        MathFunctions::Sqrt => math_sqrt(heap, args),
-        MathFunctions::Isqrt => math_isqrt(heap, args),
-        MathFunctions::Cbrt => math_cbrt(heap, args),
-        MathFunctions::Pow => math_pow(heap, args),
-        MathFunctions::Exp => math_exp(heap, args),
-        MathFunctions::Exp2 => math_exp2(heap, args),
-        MathFunctions::Expm1 => math_expm1(heap, args),
+        MathFunctions::Sqrt => math_sqrt(vm.heap, args),
+        MathFunctions::Isqrt => math_isqrt(vm.heap, args),
+        MathFunctions::Cbrt => math_cbrt(vm.heap, args),
+        MathFunctions::Pow => math_pow(vm.heap, args),
+        MathFunctions::Exp => math_exp(vm.heap, args),
+        MathFunctions::Exp2 => math_exp2(vm.heap, args),
+        MathFunctions::Expm1 => math_expm1(vm.heap, args),
         // Logarithms
-        MathFunctions::Log => math_log(heap, args),
-        MathFunctions::Log1p => math_log1p(heap, args),
-        MathFunctions::Log2 => math_log2(heap, args),
-        MathFunctions::Log10 => math_log10(heap, args),
+        MathFunctions::Log => math_log(vm.heap, args),
+        MathFunctions::Log1p => math_log1p(vm.heap, args),
+        MathFunctions::Log2 => math_log2(vm.heap, args),
+        MathFunctions::Log10 => math_log10(vm.heap, args),
         // Float properties
-        MathFunctions::Fabs => math_fabs(heap, args),
-        MathFunctions::Isnan => math_isnan(heap, args),
-        MathFunctions::Isinf => math_isinf(heap, args),
-        MathFunctions::Isfinite => math_isfinite(heap, args),
-        MathFunctions::Copysign => math_copysign(heap, args),
-        MathFunctions::Isclose => math_isclose(heap, args, interns),
-        MathFunctions::Nextafter => math_nextafter(heap, args),
-        MathFunctions::Ulp => math_ulp(heap, args),
+        MathFunctions::Fabs => math_fabs(vm.heap, args),
+        MathFunctions::Isnan => math_isnan(vm.heap, args),
+        MathFunctions::Isinf => math_isinf(vm.heap, args),
+        MathFunctions::Isfinite => math_isfinite(vm.heap, args),
+        MathFunctions::Copysign => math_copysign(vm.heap, args),
+        MathFunctions::Isclose => math_isclose(vm.heap, args, vm.interns),
+        MathFunctions::Nextafter => math_nextafter(vm.heap, args),
+        MathFunctions::Ulp => math_ulp(vm.heap, args),
         // Trigonometric
-        MathFunctions::Sin => math_sin(heap, args),
-        MathFunctions::Cos => math_cos(heap, args),
-        MathFunctions::Tan => math_tan(heap, args),
-        MathFunctions::Asin => math_asin(heap, args),
-        MathFunctions::Acos => math_acos(heap, args),
-        MathFunctions::Atan => math_atan(heap, args),
-        MathFunctions::Atan2 => math_atan2(heap, args),
+        MathFunctions::Sin => math_sin(vm.heap, args),
+        MathFunctions::Cos => math_cos(vm.heap, args),
+        MathFunctions::Tan => math_tan(vm.heap, args),
+        MathFunctions::Asin => math_asin(vm.heap, args),
+        MathFunctions::Acos => math_acos(vm.heap, args),
+        MathFunctions::Atan => math_atan(vm.heap, args),
+        MathFunctions::Atan2 => math_atan2(vm.heap, args),
         // Hyperbolic
-        MathFunctions::Sinh => math_sinh(heap, args),
-        MathFunctions::Cosh => math_cosh(heap, args),
-        MathFunctions::Tanh => math_tanh(heap, args),
-        MathFunctions::Asinh => math_asinh(heap, args),
-        MathFunctions::Acosh => math_acosh(heap, args),
-        MathFunctions::Atanh => math_atanh(heap, args),
+        MathFunctions::Sinh => math_sinh(vm.heap, args),
+        MathFunctions::Cosh => math_cosh(vm.heap, args),
+        MathFunctions::Tanh => math_tanh(vm.heap, args),
+        MathFunctions::Asinh => math_asinh(vm.heap, args),
+        MathFunctions::Acosh => math_acosh(vm.heap, args),
+        MathFunctions::Atanh => math_atanh(vm.heap, args),
         // Angular conversion
-        MathFunctions::Degrees => math_degrees(heap, args),
-        MathFunctions::Radians => math_radians(heap, args),
+        MathFunctions::Degrees => math_degrees(vm.heap, args),
+        MathFunctions::Radians => math_radians(vm.heap, args),
         // Integer math
-        MathFunctions::Factorial => math_factorial(heap, args),
-        MathFunctions::Gcd => math_gcd(heap, args),
-        MathFunctions::Lcm => math_lcm(heap, args),
-        MathFunctions::Comb => math_comb(heap, args),
-        MathFunctions::Perm => math_perm(heap, args),
+        MathFunctions::Factorial => math_factorial(vm.heap, args),
+        MathFunctions::Gcd => math_gcd(vm.heap, args),
+        MathFunctions::Lcm => math_lcm(vm.heap, args),
+        MathFunctions::Comb => math_comb(vm.heap, args),
+        MathFunctions::Perm => math_perm(vm.heap, args),
         // Modular / decomposition
-        MathFunctions::Fmod => math_fmod(heap, args),
-        MathFunctions::Remainder => math_remainder(heap, args),
-        MathFunctions::Modf => math_modf(heap, args),
-        MathFunctions::Frexp => math_frexp(heap, args),
-        MathFunctions::Ldexp => math_ldexp(heap, args),
+        MathFunctions::Fmod => math_fmod(vm.heap, args),
+        MathFunctions::Remainder => math_remainder(vm.heap, args),
+        MathFunctions::Modf => math_modf(vm.heap, args),
+        MathFunctions::Frexp => math_frexp(vm.heap, args),
+        MathFunctions::Ldexp => math_ldexp(vm.heap, args),
         // Special functions
-        MathFunctions::Gamma => math_gamma(heap, args),
-        MathFunctions::Lgamma => math_lgamma(heap, args),
-        MathFunctions::Erf => math_erf(heap, args),
-        MathFunctions::Erfc => math_erfc(heap, args),
+        MathFunctions::Gamma => math_gamma(vm.heap, args),
+        MathFunctions::Lgamma => math_lgamma(vm.heap, args),
+        MathFunctions::Erf => math_erf(vm.heap, args),
+        MathFunctions::Erfc => math_erfc(vm.heap, args),
     }
 }
 
@@ -373,20 +483,23 @@ fn math_isqrt(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
         return Ok(Value::Int(0));
     }
 
-    // Integer square root via f64 estimate + overshoot correction.
-    // For i64 inputs, f64 sqrt is accurate to within ±1, so we only need
-    // to correct at most a 1-unit overshoot (verified empirically across
-    // the full i64 range — f64's 53-bit mantissa gives sufficient precision
-    // for sqrt of any 63-bit integer).
+    // Integer square root via f64 estimate + correction.
+    // For i64 inputs, f64 sqrt is accurate to within ±1, so we need to
+    // correct both overshoot and undershoot. The cast truncates toward zero,
+    // so undershoot is possible for perfect squares near f64 precision limits.
     #[expect(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,
-        reason = "initial estimate doesn't need to be exact, overshoot correction refines it"
+        reason = "initial estimate doesn't need to be exact, correction refines it"
     )]
     let mut x = (n as f64).sqrt() as i64;
     // Correct overshoot: use `x > n / x` instead of `x * x > n` to avoid i64 overflow.
     while x > n / x {
         x -= 1;
+    }
+    // Correct undershoot: check if (x+1)² ≤ n using division to avoid overflow.
+    while x < n / (x + 1) {
+        x += 1;
     }
     Ok(Value::Int(x))
 }
@@ -417,14 +530,14 @@ fn math_pow(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
     let result = x.powf(y);
     // CPython raises ValueError for domain errors: 0**negative, negative**non-integer
     if result.is_nan() && !x.is_nan() && !y.is_nan() {
-        return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
+        return Err(math_domain_error());
     }
     if result.is_infinite() && x.is_finite() && y.is_finite() {
         // 0**negative is a domain error (ValueError), not overflow
         if x == 0.0 && y < 0.0 {
-            return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
+            return Err(math_domain_error());
         }
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
+        return Err(math_range_error());
     }
     Ok(Value::Float(result))
 }
@@ -436,9 +549,7 @@ fn math_exp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult
 
     let f = value_to_float(value, heap)?;
     let result = f.exp();
-    if result.is_infinite() && f.is_finite() {
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
-    }
+    check_range_error(result, f)?;
     Ok(Value::Float(result))
 }
 
@@ -449,9 +560,7 @@ fn math_exp2(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
 
     let f = value_to_float(value, heap)?;
     let result = f.exp2();
-    if result.is_infinite() && f.is_finite() {
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
-    }
+    check_range_error(result, f)?;
     Ok(Value::Float(result))
 }
 
@@ -464,9 +573,7 @@ fn math_expm1(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
 
     let f = value_to_float(value, heap)?;
     let result = f.exp_m1();
-    if result.is_infinite() && f.is_finite() {
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
-    }
+    check_range_error(result, f)?;
     Ok(Value::Float(result))
 }
 
@@ -665,7 +772,7 @@ fn math_isclose(heap: &mut Heap<impl ResourceTracker>, args: ArgValues, interns:
     }
 
     let diff = (a - b).abs();
-    let result = diff <= (rel_tol * a.abs()).max(rel_tol * b.abs()).max(abs_tol);
+    let result = diff <= (rel_tol * a.abs().max(b.abs())).max(abs_tol);
     Ok(Value::Bool(result))
 }
 
@@ -797,14 +904,7 @@ fn math_asin(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     defer_drop!(value, heap);
 
     let f = value_to_float(value, heap)?;
-    // NaN passes through (asin(nan) = nan), but out-of-range finite values raise
-    if !f.is_nan() && !(-1.0..=1.0).contains(&f) {
-        return Err(SimpleException::new_msg(
-            ExcType::ValueError,
-            format!("expected a number in range from -1 up to 1, got {f:?}"),
-        )
-        .into());
-    }
+    require_unit_range(f)?;
     Ok(Value::Float(f.asin()))
 }
 
@@ -816,14 +916,7 @@ fn math_acos(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
     defer_drop!(value, heap);
 
     let f = value_to_float(value, heap)?;
-    // NaN passes through (acos(nan) = nan), but out-of-range finite values raise
-    if !f.is_nan() && !(-1.0..=1.0).contains(&f) {
-        return Err(SimpleException::new_msg(
-            ExcType::ValueError,
-            format!("expected a number in range from -1 up to 1, got {f:?}"),
-        )
-        .into());
-    }
+    require_unit_range(f)?;
     Ok(Value::Float(f.acos()))
 }
 
@@ -859,9 +952,7 @@ fn math_sinh(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
 
     let f = value_to_float(value, heap)?;
     let result = f.sinh();
-    if result.is_infinite() && f.is_finite() {
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
-    }
+    check_range_error(result, f)?;
     Ok(Value::Float(result))
 }
 
@@ -872,9 +963,7 @@ fn math_cosh(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
 
     let f = value_to_float(value, heap)?;
     let result = f.cosh();
-    if result.is_infinite() && f.is_finite() {
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
-    }
+    check_range_error(result, f)?;
     Ok(Value::Float(result))
 }
 
@@ -1161,7 +1250,7 @@ fn math_fmod(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResul
         // CPython raises for both fmod(x, 0) and fmod(inf, y)
         // but NaN inputs propagate
         if !x.is_nan() && !y.is_nan() {
-            return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
+            return Err(math_domain_error());
         }
     }
     Ok(Value::Float(x % y))
@@ -1183,10 +1272,10 @@ fn math_remainder(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> Run
         return Ok(Value::Float(f64::NAN));
     }
     if y == 0.0 {
-        return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
+        return Err(math_domain_error());
     }
     if x.is_infinite() {
-        return Err(SimpleException::new_msg(ExcType::ValueError, "math domain error").into());
+        return Err(math_domain_error());
     }
     if y.is_infinite() {
         return Ok(Value::Float(x));
@@ -1316,7 +1405,7 @@ fn math_ldexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
 
     // If the result overflowed to infinity, CPython raises OverflowError
     if result.is_infinite() {
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
+        return Err(math_range_error());
     }
 
     Ok(Value::Float(result))
@@ -1330,16 +1419,12 @@ fn math_ldexp(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
 ///
 /// CPython 3.14 raises ValueError for non-positive integers:
 /// "expected a noninteger or positive integer, got <x>".
-#[expect(
-    clippy::float_cmp,
-    reason = "exact comparison detects integer poles of gamma function"
-)]
 fn math_gamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
     let value = args.get_one_arg("math.gamma", heap)?;
     defer_drop!(value, heap);
 
     let f = value_to_float(value, heap)?;
-    // CPython raises ValueError for -inf
+    // CPython also rejects -inf for gamma (but not lgamma, where lgamma(-inf) = inf)
     if f == f64::NEG_INFINITY {
         return Err(SimpleException::new_msg(
             ExcType::ValueError,
@@ -1347,45 +1432,23 @@ fn math_gamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResu
         )
         .into());
     }
-    // Check for non-positive integers (poles of the gamma function)
-    if f <= 0.0 && f == f.floor() && f.is_finite() {
-        return Err(SimpleException::new_msg(
-            ExcType::ValueError,
-            format!("expected a noninteger or positive integer, got {f:?}"),
-        )
-        .into());
-    }
+    check_gamma_pole(f)?;
 
     let result = gamma_impl(f);
-    if result.is_infinite() && f.is_finite() {
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
-    }
+    check_range_error(result, f)?;
     Ok(Value::Float(result))
 }
 
 /// `math.lgamma(x)` — returns the natural log of the absolute value of Gamma(x).
-#[expect(
-    clippy::float_cmp,
-    reason = "exact comparison detects integer poles of gamma function"
-)]
 fn math_lgamma(heap: &mut Heap<impl ResourceTracker>, args: ArgValues) -> RunResult<Value> {
     let value = args.get_one_arg("math.lgamma", heap)?;
     defer_drop!(value, heap);
 
     let f = value_to_float(value, heap)?;
-    // Check for non-positive integers (poles of the gamma function)
-    if f <= 0.0 && f == f.floor() && f.is_finite() {
-        return Err(SimpleException::new_msg(
-            ExcType::ValueError,
-            format!("expected a noninteger or positive integer, got {f:?}"),
-        )
-        .into());
-    }
+    check_gamma_pole(f)?;
 
     let result = lgamma_impl(f);
-    if result.is_infinite() && f.is_finite() {
-        return Err(SimpleException::new_msg(ExcType::OverflowError, "math range error").into());
-    }
+    check_range_error(result, f)?;
     Ok(Value::Float(result))
 }
 
@@ -1591,33 +1654,10 @@ fn gamma_impl(x: f64) -> f64 {
 }
 
 /// Lanczos series computation for Γ(x) where x >= 0.5.
-#[expect(
-    clippy::excessive_precision,
-    clippy::inconsistent_digit_grouping,
-    reason = "Lanczos coefficients require full precision and exact values"
-)]
 fn lanczos_gamma(x: f64) -> f64 {
-    // Coefficients for g=7, n=9 (from Paul Godfrey's tables)
-    const P: [f64; 9] = [
-        0.999_999_999_999_809_93,
-        676.520_368_121_885_1,
-        -1259.139_216_722_402_8,
-        771.323_428_777_653_08,
-        -176.615_029_162_140_6,
-        12.507_343_278_686_905,
-        -0.138_571_095_265_720_12,
-        9.984_369_578_019_572e-6,
-        1.505_632_735_149_311_6e-7,
-    ];
-    const G: f64 = 7.0;
-
     let z = x - 1.0;
-    let mut sum = P[0];
-    for (i, &coeff) in P.iter().enumerate().skip(1) {
-        sum += coeff / (z + i as f64);
-    }
-    let t = z + G + 0.5;
-    (2.0 * std::f64::consts::PI).sqrt() * t.powf(z + 0.5) * (-t).exp() * sum
+    let (sum, t) = lanczos_series(z);
+    SQRT_2PI * t.powf(z + 0.5) * (-t).exp() * sum
 }
 
 /// Computes ln(|Γ(x)|) using the Lanczos approximation.
@@ -1654,32 +1694,10 @@ fn lgamma_impl(x: f64) -> f64 {
 }
 
 /// Lanczos series computation for ln(Γ(x)) where x >= 0.5.
-#[expect(
-    clippy::excessive_precision,
-    clippy::inconsistent_digit_grouping,
-    reason = "Lanczos coefficients require full precision and exact values"
-)]
 fn lanczos_lgamma(x: f64) -> f64 {
-    const P: [f64; 9] = [
-        0.999_999_999_999_809_93,
-        676.520_368_121_885_1,
-        -1259.139_216_722_402_8,
-        771.323_428_777_653_08,
-        -176.615_029_162_140_6,
-        12.507_343_278_686_905,
-        -0.138_571_095_265_720_12,
-        9.984_369_578_019_572e-6,
-        1.505_632_735_149_311_6e-7,
-    ];
-    const G: f64 = 7.0;
-
     let z = x - 1.0;
-    let mut sum = P[0];
-    for (i, &coeff) in P.iter().enumerate().skip(1) {
-        sum += coeff / (z + i as f64);
-    }
-    let t = z + G + 0.5;
-    0.5 * (2.0 * std::f64::consts::PI).ln() + (z + 0.5) * t.ln() - t + sum.ln()
+    let (sum, t) = lanczos_series(z);
+    HALF_LN_2PI + (z + 0.5) * t.ln() - t + sum.ln()
 }
 
 /// Error function with full double precision (~15 significant digits).
@@ -1712,10 +1730,7 @@ fn erf_impl(x: f64) -> f64 {
         x + x * (r / s)
     } else if abs_x < 1.25 {
         // 0.84375 ≤ |x| < 1.25: erf(x) = erx + P1(|x|-1) / Q1(|x|-1)
-        let s = abs_x - 1.0;
-        let p = PA0 + s * (PA1 + s * (PA2 + s * (PA3 + s * (PA4 + s * (PA5 + s * PA6)))));
-        let q = 1.0 + s * (QA1 + s * (QA2 + s * (QA3 + s * (QA4 + s * (QA5 + s * QA6)))));
-        sign * (ERX + p / q)
+        sign * (ERX + erf_range2_poly(abs_x))
     } else if abs_x >= 28.0 {
         sign
     } else {
@@ -1750,10 +1765,8 @@ fn erfc_impl(x: f64) -> f64 {
 
     let result = if abs_x < 1.25 {
         // 0.84375 ≤ |x| < 1.25
-        let s = abs_x - 1.0;
-        let p = PA0 + s * (PA1 + s * (PA2 + s * (PA3 + s * (PA4 + s * (PA5 + s * PA6)))));
-        let q = 1.0 + s * (QA1 + s * (QA2 + s * (QA3 + s * (QA4 + s * (QA5 + s * QA6)))));
-        if x < 0.0 { 1.0 + ERX + p / q } else { 1.0 - ERX - p / q }
+        let pq = erf_range2_poly(abs_x);
+        if x < 0.0 { 1.0 + ERX + pq } else { 1.0 - ERX - pq }
     } else {
         erfc_inner(abs_x)
     };
