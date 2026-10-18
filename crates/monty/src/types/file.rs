@@ -684,17 +684,14 @@ impl<'h> HeapObjectRead<'h, OpenFile> {
         spec: ReadSpec,
         effect: fn(HeapId) -> PostConversionEffect,
     ) -> RunResult<CallResult> {
+        self.check_readable(vm)?;
+        // `eof` on a readable file is only ever flipped by a path that
+        // also populates `buffer`, so we never need to short-circuit on
+        // EOF without a loaded buffer here. Write-only files would be
+        // the only case where `eof=true && buffer=None` is possible, and
+        // they're rejected by the readable check above.
         let buffer_loaded = {
             let file = self.get(vm.heap);
-            file.ensure_open()?;
-            if !file.mode.readable() {
-                return Err(unsupported_operation("not readable"));
-            }
-            // `eof` on a readable file is only ever flipped by a path that
-            // also populates `buffer`, so we never need to short-circuit on
-            // EOF without a loaded buffer here. Write-only files would be
-            // the only case where `eof=true && buffer=None` is possible, and
-            // they're rejected by the readable check above.
             debug_assert!(!file.eof || file.buffer.is_some());
             file.buffer.is_some()
         };
@@ -707,6 +704,33 @@ impl<'h> HeapObjectRead<'h, OpenFile> {
         self.get_mut(vm.heap).pending_read = Some(spec);
         let effect = effect(self.id());
         Ok(self.buffer_load_call(vm, effect))
+    }
+
+    /// `tomllib.load(fp)`'s `fp.read()`: the whole remaining content as one
+    /// value. The caller loads an unread file first (see [`Self::needs_buffer_load`]).
+    pub(crate) fn read_all(&mut self, vm: &mut VM<'h>) -> RunResult<Value> {
+        if self.get(vm.heap).buffer.is_some() {
+            compute_slice(self, ReadSpec::All, vm)
+        } else {
+            Err(RunError::internal("read_all: file buffer is not loaded"))
+        }
+    }
+
+    /// Raises what a read on this file would: `ValueError` once closed, then
+    /// `io.UnsupportedOperation` when it was not opened for reading.
+    pub(crate) fn check_readable(&self, vm: &VM<'h>) -> RunResult<()> {
+        let file = self.get(vm.heap);
+        file.ensure_open()?;
+        if file.mode.readable() {
+            Ok(())
+        } else {
+            Err(unsupported_operation("not readable"))
+        }
+    }
+
+    /// Whether reads yield `bytes` rather than `str`.
+    pub(crate) fn is_binary(&self, vm: &VM<'h>) -> bool {
+        self.get(vm.heap).mode.is_binary()
     }
 
     /// Whether an iteration step must load the buffer from the host first:

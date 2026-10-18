@@ -354,8 +354,8 @@ pub(crate) enum PostConversionEffect {
         result_none: bool,
     },
     /// Load an unread file's buffer, then replay `callable(args)`, whose first
-    /// argument the file is (`csv.reader(f)`): the consumer never sees an
-    /// unloaded file. Owns the callable and the arguments across the yield.
+    /// argument the file is (`csv.reader(f)`, `tomllib.load(f)`): the consumer
+    /// never sees an unloaded file. Owns the callable and the arguments across the yield.
     LoadThenCall {
         file_id: HeapId,
         callable: Value,
