@@ -387,7 +387,8 @@ every construction request. Divergences:
     except `@=`, which is rejected at compile time.
     `__ne__` is always the negation of `__eq__`, so a custom `__ne__` is ignored.
 - **Sequence repetition does not consult `__index__`.**
-    `'ab' * obj` and `[0] * obj` raise `TypeError: unsupported operand type(s) for *` where CPython repeats.
+    `'ab' * obj` and `[0] * obj` raise `TypeError: can't multiply sequence by non-int of type 'Foo'`
+    for an instance of `Foo`, where CPython repeats.
 - **Returning `bool` from `__int__` or `__index__` does not emit a `DeprecationWarning`.**
 - **Subscript assignment does not dispatch `__index__`.** `lst[obj] = x` raises
     `TypeError: list indices must be integers or slices, not Foo` where CPython

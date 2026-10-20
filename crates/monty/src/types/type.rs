@@ -16,6 +16,7 @@ use crate::{
         itertools,
         itertools::ItertoolsFunctions,
     },
+    py_value::PyValue,
     types::{
         Bytes, Deque, Dict, FrozenSet, GenericAlias, List, LongInt, Partial, Path, PyTrait, Random, Range, Set, Slice,
         Str, TimeZone, Tuple,
@@ -478,6 +479,15 @@ impl Type {
                 // The one `itertools` type CPython gives a
                 // `__class_getitem__`; the rest reject a subscript.
                 | Self::ItertoolsChain
+        )
+    }
+
+    /// Whether multiplication can fall back to CPython's sequence-repetition protocol.
+    #[must_use]
+    pub(crate) const fn has_sequence_repeat(self) -> bool {
+        matches!(
+            self,
+            Self::Str | Self::Bytes | Self::List | Self::Tuple | Self::NamedTuple | Self::Deque
         )
     }
 
@@ -990,15 +1000,9 @@ fn int_convert(x: &Value, vm: &mut VM<'_>) -> RunResult<Value> {
     } else if let Some(value) = x.py_index_impl(vm)? {
         Ok(value)
     } else {
-        let interns = vm.interns;
-        match x {
-            Value::InternString(string_id) => parse_int_from_str(interns.get_str(*string_id), 10, vm.heap),
-            Value::InternBytes(bytes_id) => parse_int_from_bytes(interns.get_bytes(*bytes_id), 10, vm.heap),
-            Value::Ref(heap_id) => match vm.heap.get(*heap_id) {
-                HeapData::Str(s) => parse_int_from_str(s.as_str(), 10, vm.heap),
-                HeapData::Bytes(b) => parse_int_from_bytes(b.as_slice(), 10, vm.heap),
-                _ => Err(ExcType::type_error_int_conversion(&x.py_type_name(vm))),
-            },
+        match x.py_value(vm) {
+            PyValue::Str(value) => parse_int_from_str(value.as_str(vm), 10, vm.heap),
+            PyValue::Bytes(value) => parse_int_from_bytes(value.as_slice(vm), 10, vm.heap),
             _ => Err(ExcType::type_error_int_conversion(&x.py_type_name(vm))),
         }
     }
