@@ -182,15 +182,10 @@ impl<'h> VM<'h> {
 
     /// Executes `CallFunctionKw` opcode.
     ///
-    /// Pops the callable, positional args, and keyword args from the stack,
+    /// Reads `kw_count` keyword name operands from the instruction stream,
+    /// pops the keyword values, positional args, and callable from the stack,
     /// builds the appropriate `ArgValues`, and calls the function.
-    pub(super) fn exec_call_function_kw(
-        &mut self,
-        pos_count: usize,
-        kwname_ids: Vec<StringId>,
-    ) -> Result<CallResult, RunError> {
-        let kw_count = kwname_ids.len();
-
+    pub(super) fn exec_call_function_kw(&mut self, pos_count: usize, kw_count: usize) -> Result<CallResult, RunError> {
         // Pop keyword values (TOS is last kwarg value)
         let kw_values = self.pop_n(kw_count);
 
@@ -202,8 +197,12 @@ impl<'h> VM<'h> {
         let this = self;
         defer_drop!(callable, this);
 
-        // Build kwargs as Vec<(StringId, Value)>
-        let kwargs_inline: Vec<(StringId, Value)> = kwname_ids.into_iter().zip(kw_values).collect();
+        // Build kwargs directly as Vec<(StringId, Value)>
+        let mut kwargs_inline = Vec::with_capacity(kw_count);
+        for value in kw_values {
+            let name_id = StringId::from_index(this.current_frame.fetch_u16());
+            kwargs_inline.push((name_id, value));
+        }
 
         // Build ArgValues with both positional and keyword args
         let args = if pos_args.is_empty() && kwargs_inline.is_empty() {
@@ -232,17 +231,16 @@ impl<'h> VM<'h> {
 
     /// Executes `CallAttrKw` opcode.
     ///
-    /// Pops the object, positional args, and keyword args from the stack,
+    /// Reads `kw_count` keyword name operands from the instruction stream,
+    /// pops the keyword values, positional args, and object from the stack,
     /// builds the appropriate `ArgValues`, and calls the attribute.
     /// Returns a `CallResult` which may indicate an OS or external call.
     pub(super) fn exec_call_attr_kw(
         &mut self,
         name_id: StringId,
         pos_count: usize,
-        kwname_ids: Vec<StringId>,
+        kw_count: usize,
     ) -> Result<CallResult, RunError> {
-        let kw_count = kwname_ids.len();
-
         // Pop keyword values (TOS is last kwarg value)
         let kw_values = self.pop_n(kw_count);
 
@@ -252,8 +250,12 @@ impl<'h> VM<'h> {
         // Pop the object
         let obj = self.pop();
 
-        // Build kwargs as Vec<(StringId, Value)>
-        let kwargs_inline: Vec<(StringId, Value)> = kwname_ids.into_iter().zip(kw_values).collect();
+        // Build kwargs directly as Vec<(StringId, Value)>
+        let mut kwargs_inline = Vec::with_capacity(kw_count);
+        for value in kw_values {
+            let kw_name_id = StringId::from_index(self.current_frame.fetch_u16());
+            kwargs_inline.push((kw_name_id, value));
+        }
 
         // Build ArgValues with both positional and keyword args
         let args = if pos_args.is_empty() && kwargs_inline.is_empty() {
